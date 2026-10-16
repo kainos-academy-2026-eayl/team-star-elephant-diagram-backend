@@ -1,8 +1,15 @@
-import express, { type Express, type Request, type Response } from 'express';
+import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
+import { createRegisterRouter } from './controllers/registerController';
+import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
+import { UserService } from './services/userService';
 
-export function createApp(): Express {
+export interface AppDependencies {
+  userRepository?: UserRepository;
+}
+
+export function createApp({ userRepository = prismaUserRepository }: AppDependencies = {}): Express {
   const app = express();
 
   nunjucks.configure(join(import.meta.dirname, 'views'), {
@@ -12,6 +19,8 @@ export function createApp(): Express {
   });
   app.set('view engine', 'njk');
 
+  app.use(express.json({ limit: '100kb' }));
+
   // app.get('/', (_req: Request, res: Response) => {
   //   res.render('index');
   // }); commented out as don't require nunjucks files for backend
@@ -20,8 +29,14 @@ export function createApp(): Express {
     res.json({ status: 'UP', time: new Date().toISOString() });
   });
 
-  app.get('/register', (_req: Request, res: Response) => {
-    res.json({ status: 'REGISTER_ENDPOINT' });
+  app.use('/register', createRegisterRouter(new UserService(userRepository)));
+
+  app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+    if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
+      res.status(400).json({ error: 'Malformed JSON body' });
+      return;
+    }
+    next(error);
   });
 
   return app;
