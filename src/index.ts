@@ -20,7 +20,7 @@ const app = createApp()
 
 // Keep everything below this comment at the bottom of the file
 const server = app.listen(PORT, HOST, () => {
-  console.log(`Listening on http://${HOST}:${PORT}`)
+  console.log(`Listening on http://localhost:${PORT}`)
 })
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {

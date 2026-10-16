@@ -2,7 +2,7 @@
 
 A starter repository for building Node.js HTTP services in the Technologist Academy.
 
-It gives you a working Express service with TypeScript and a production build already wired together, so you can start writing features. Out of the box it exposes a single `GET /health` endpoint that reports service status and uptime.
+It gives you a working Express service with TypeScript and a production build already wired together, so you can start writing features. It renders a Hello World HTML page at `GET /` using Nunjucks and exposes a `GET /health` endpoint that reports service status and the current timestamp.
 
 ## Requirements
 
@@ -40,8 +40,12 @@ Then in another terminal:
 
 ```sh
 curl http://localhost:3000/health
-# {"status":"ok","uptime":1.234}
+# {"status":"UP","time":"2026-10-15T14:30:00.000Z"}
+curl http://localhost:3000/
+# HTML containing <h1>Hello World</h1>
 ```
+
+The health check's `time` is the current UTC time in ISO 8601 format.
 
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
 
@@ -65,9 +69,10 @@ Never commit your `.env` file. It is already listed in [.gitignore](.gitignore);
 
 | Script | Command | What it does |
 | --- | --- | --- |
-| `npm run dev` | `tsx watch src/index.ts` | Runs the service from TypeScript source and restarts on file changes. Use this while developing. |
+| `npm run dev` | `tsx watch` | Runs the service from TypeScript source and restarts on source or Nunjucks template changes. Use this while developing. |
 | `npm run typecheck` | `tsc` | Checks types without emitting files. |
-| `npm run build` | `tsc` then `esbuild` | Type-checks, then bundles the service into `dist/index.js` for production. |
+| `npm run build` | `tsc`, `esbuild`, then template copy | Type-checks, bundles the service into `dist/index.js`, and copies templates into `dist/views/` for production. |
+| `npm test` | `node --import tsx --test` | Checks the HTML page and health check responses. |
 | `npm start` | `node dist/index.js` | Runs the built output. Requires `npm run build` first. |
 Before pushing, run `npm run typecheck` and `npm run build`.
 
@@ -77,7 +82,9 @@ Before pushing, run `npm run typecheck` and `npm run build`.
 .
 ├── src/
 │   ├── index.ts          # entry point: config, server startup, shutdown
-│   └── app.ts            # builds the Express app and registers routes
+│   ├── app.ts            # builds the Express app and registers routes
+│   └── views/index.njk   # Hello World HTML template
+├── test/app.test.mjs     # endpoint tests
 ├── .env                  # your local secrets and config (not committed)
 ├── .env.example          # template listing required env variables
 ├── .github/              # GitHub configuration
