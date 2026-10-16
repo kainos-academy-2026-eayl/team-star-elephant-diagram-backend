@@ -148,12 +148,12 @@ npm run db:migrate       # apply Prisma migrations (creates the User table)
 curl -X POST http://localhost:3000/register \
   -H 'content-type: application/json' \
   -d '{"email":"ada@example.com","password":"correct-horse"}'
-# 200 {"id":1,"email":"ada@example.com","createdAt":"..."}
+# 201 {"status":"created"}
 ```
 
 | Status | When |
 | --- | --- |
-| `200` | Account created. The response never includes the password or its hash. |
+| `201` | Account created. Response body is `{"status":"created"}`. |
 | `400` | Body fails Zod validation (invalid email, password shorter than 8 characters or longer than 72 bytes, malformed JSON), or the email is already registered. |
 | `500` | Unexpected server error, such as the database being unavailable. |
 

@@ -35,14 +35,12 @@ const register = (body) =>
     body: typeof body === 'string' ? body : JSON.stringify(body),
   })
 
-test('POST /register returns 200 and never exposes the password', async () => {
+test('POST /register returns 201 with status created and normalises the email', async () => {
   const response = await register({ email: 'Ada@Example.com ', password: 'correct-horse' })
-  const body = await response.json()
 
-  assert.equal(response.status, 200)
-  assert.equal(body.email, 'ada@example.com')
-  assert.equal(body.password, undefined)
-  assert.equal(body.passwordHash, undefined)
+  assert.equal(response.status, 201)
+  assert.deepEqual(await response.json(), { status: 'created' })
+  assert.ok(users.has('ada@example.com'))
 })
 
 test('POST /register stores only a one-way bcrypt hash of the password', async () => {
@@ -55,7 +53,7 @@ test('POST /register stores only a one-way bcrypt hash of the password', async (
 })
 
 test('POST /register returns 400 and creates no duplicate for an already registered email', async () => {
-  assert.equal((await register({ email: 'ada@example.com', password: 'correct-horse' })).status, 200)
+  assert.equal((await register({ email: 'ada@example.com', password: 'correct-horse' })).status, 201)
   const response = await register({ email: 'ADA@example.com', password: 'another-pass' })
 
   assert.equal(response.status, 400)
