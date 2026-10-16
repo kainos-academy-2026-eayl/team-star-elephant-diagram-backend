@@ -20,5 +20,9 @@ export function createApp(): Express {
     res.json({ status: 'UP', time: new Date().toISOString() });
   });
 
+  app.get('/register', (_req: Request, res: Response) => {
+    res.json({ status: 'REGISTER_ENDPOINT' });
+  });
+
   return app;
 }
