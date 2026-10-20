@@ -20,12 +20,10 @@ after(async () => {
   }
 })
 
-test('GET / returns a Hello World HTML page', async () => {
+test('GET / returns 404 for the API-only backend', async () => {
   const response = await fetch(`${baseUrl}/`)
 
-  assert.equal(response.status, 200)
-  assert.match(response.headers.get('content-type'), /text\/html/)
-  assert.match(await response.text(), /<h1>Hello World<\/h1>/)
+  assert.equal(response.status, 404)
 })
 
 test('GET /health returns UP and the current ISO timestamp', async () => {

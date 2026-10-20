@@ -2,18 +2,30 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  test:
+  verify:
+    name: Build, lint and test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - run: npm ci
-      - run: npm run lint
-      - run: npm test
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
