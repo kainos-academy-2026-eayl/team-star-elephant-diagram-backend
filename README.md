@@ -164,18 +164,19 @@ docker compose up -d     # start local Postgres
 npm run db:migrate       # apply Prisma migrations (creates the User table)
 curl -X POST http://localhost:3000/register \
   -H 'content-type: application/json' \
-  -d '{"email":"ada@example.com","password":"correct-horse"}'
+  -d '{"forename":"Ada","surname":"Lovelace","email":"ada@example.com","password":"correct-horse"}'
 # 201 {"status":"created"}
 ```
 
 | Status | When |
 | --- | --- |
 | `201` | Account created. Response body is `{"status":"created"}`. |
-| `400` | Body fails Zod validation (invalid email, password shorter than 8 characters or longer than 72 bytes, malformed JSON), or the email is already registered. |
+| `400` | Body fails Zod validation (missing, blank or over-100-character forename/surname, invalid email, password shorter than 8 or longer than 128 characters, malformed JSON), or the email is already registered. |
 | `500` | Unexpected server error, such as the database being unavailable. |
 
+- Forenames and surnames are trimmed. `created_at` and `modified_at` are both set to the registration time.
 - Emails are trimmed and lower-cased, and `User.email` has a unique constraint, so the same address can't be registered twice, even by concurrent requests.
-- Passwords are hashed locally with bcrypt (cost 12) via `bcryptjs`. Only the one-way hash is stored, and no external identity provider is used.
+- Passwords are hashed locally with argon2id via `argon2` (OWASP minimum parameters: 19 MiB memory, 2 iterations, parallelism 1). Only the one-way hash is stored, and no external identity provider is used.
 
 ## Configuration
 

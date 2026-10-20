@@ -1,10 +1,22 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../prismaClient';
 
+export interface NewUser {
+  forename: string;
+  surname: string;
+  email: string;
+  passwordHash: string;
+  createdAt: Date;
+  modifiedAt: Date;
+}
+
 export interface CreatedUser {
   id: number;
+  forename: string;
+  surname: string;
   email: string;
   createdAt: Date;
+  modifiedAt: Date;
 }
 
 export class DuplicateEmailError extends Error {
@@ -15,15 +27,15 @@ export class DuplicateEmailError extends Error {
 }
 
 export interface UserRepository {
-  create(email: string, passwordHash: string): Promise<CreatedUser>;
+  create(user: NewUser): Promise<CreatedUser>;
 }
 
 export const prismaUserRepository: UserRepository = {
-  async create(email, passwordHash) {
+  async create({ forename, surname, email, passwordHash, createdAt, modifiedAt }) {
     try {
       return await prisma.user.create({
-        data: { email, passwordHash },
-        select: { id: true, email: true, createdAt: true },
+        data: { forename, surname, email, passwordHash, createdAt, modifiedAt },
+        select: { id: true, forename: true, surname: true, email: true, createdAt: true, modifiedAt: true },
       });
     } catch (error) {
       // P2002 = unique constraint violation; the DB constraint is the source of truth so concurrent requests can't create duplicates
