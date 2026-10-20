@@ -65,7 +65,7 @@ test('POST /register stores only a one-way argon2id hash of the password', async
 
   assert.equal(stored.password, undefined)
   assert.notEqual(stored.passwordHash, 'correct-horse')
-  assert.match(stored.passwordHash, /^\$argon2id\$v=19\$m=19456,p=1,t=2\$/)
+  assert.match(stored.passwordHash, /^\$argon2id\$v=19\$m=19456,t=2,p=1\$/)
   assert.ok(await argon2.verify(stored.passwordHash, 'correct-horse'))
   assert.equal(await argon2.verify(stored.passwordHash, 'wrong-horse'), false)
 })
