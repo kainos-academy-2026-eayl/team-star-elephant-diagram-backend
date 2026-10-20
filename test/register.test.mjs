@@ -4,6 +4,7 @@ import { after, before, beforeEach, test } from 'node:test'
 import argon2 from 'argon2'
 import { createApp } from '../src/app.ts'
 import { DuplicateEmailError } from '../src/repositories/userRepository.ts'
+import { ARGON2_OPTIONS } from '../src/services/userService.ts'
 
 const users = new Map()
 const inMemoryUserRepository = {
@@ -65,7 +66,9 @@ test('POST /register stores only a one-way argon2id hash of the password', async
 
   assert.equal(stored.password, undefined)
   assert.notEqual(stored.passwordHash, 'correct-horse')
-  assert.match(stored.passwordHash, /^\$argon2id\$v=19\$m=19456,t=2,p=1\$/)
+  assert.ok(stored.passwordHash.startsWith('$argon2id$'))
+  // needsRehash parses the PHC string, so this checks the cost values rather than the order argon2 serialises them in
+  assert.equal(argon2.needsRehash(stored.passwordHash, ARGON2_OPTIONS), false)
   assert.ok(await argon2.verify(stored.passwordHash, 'correct-horse'))
   assert.equal(await argon2.verify(stored.passwordHash, 'wrong-horse'), false)
 })
