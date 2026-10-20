@@ -2,7 +2,7 @@
 
 A starter repository for building Node.js HTTP services in the Technologist Academy.
 
-It gives you a working Express service with TypeScript and a production build already wired together, so you can start writing features. It renders a Hello World HTML page at `GET /` using Nunjucks and exposes a `GET /health` endpoint that reports service status and the current timestamp.
+It gives you an API-only Express service with TypeScript and a production build. `GET /health` reports service status and the current timestamp. There is no home page: `GET /` returns 404.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ Then in another terminal:
 curl http://localhost:3000/health
 # {"status":"UP","time":"2026-10-15T14:30:00.000Z"}
 curl http://localhost:3000/
-# HTML containing <h1>Hello World</h1>
+# 404 Not Found
 ```
 
 The health check's `time` is the current UTC time in ISO 8601 format.
@@ -69,12 +69,30 @@ Never commit your `.env` file. It is already listed in [.gitignore](.gitignore);
 
 | Script | Command | What it does |
 | --- | --- | --- |
-| `npm run dev` | `tsx watch` | Runs the service from TypeScript source and restarts on source or Nunjucks template changes. Use this while developing. |
+| `npm run dev` | `tsx watch` | Runs the service from TypeScript source and restarts on changes. Use this while developing. |
 | `npm run typecheck` | `tsc` | Checks types without emitting files. |
-| `npm run build` | `tsc`, `esbuild`, then template copy | Type-checks, bundles the service into `dist/index.js`, and copies templates into `dist/views/` for production. |
-| `npm test` | `node --import tsx --test` | Checks the HTML page and health check responses. |
+| `npm run build` | `tsc`, `esbuild` | Type-checks and bundles the service into `dist/index.js`. |
+| `npm run lint` | `biome lint .` | Runs recommended lint rules without changing files. |
+| `npm test` | `node --import tsx --test` | Checks the health response and that the API-only root returns 404. |
 | `npm start` | `node dist/index.js` | Runs the built output. Requires `npm run build` first. |
-Before pushing, run `npm run typecheck` and `npm run build`.
+Before pushing, run `npm run build`, `npm run lint`, and `npm test`.
+
+## CI and required merge checks
+
+[The CI workflow](.github/workflows/ci.yml) runs on opened, reopened, and updated pull requests, and pushes to `main` or `master`, including merges. It uses Node from [.nvmrc](.nvmrc), installs locked dependencies, then builds, lints, and runs tests once. Any failed step fails the job.
+
+**The workflow alone does not block merging.** A repository administrator must configure GitHub protection in both the frontend and backend repositories:
+
+1. Push the workflow and let it run once so **Build, lint and test** appears as a check.
+2. Open **Settings > Branches > Add classic branch protection rule**.
+3. Set the branch pattern to `main`; repeat for `master` if used.
+4. Enable **Require a pull request before merging**.
+5. Enable **Require status checks to pass before merging** and select **Build, lint and test** from GitHub Actions.
+6. Enable **Require branches to be up to date before merging** and **Do not allow bypassing the above settings**, then save.
+
+Preserve existing protections. If an old CI check is required, replace it with the new check after its first run. Do not add bypass permissions.
+
+Verify enforcement with a temporary PR containing a deliberately failing test: CI must fail and GitHub must block merging. Fix the test and confirm CI passes before merging.
 
 ## Project structure
 
@@ -82,8 +100,7 @@ Before pushing, run `npm run typecheck` and `npm run build`.
 .
 ├── src/
 │   ├── index.ts          # entry point: config, server startup, shutdown
-│   ├── app.ts            # builds the Express app and registers routes
-│   └── views/index.njk   # Hello World HTML template
+│   └── app.ts            # builds the Express app and registers routes
 ├── test/app.test.mjs     # endpoint tests
 ├── .env                  # your local secrets and config (not committed)
 ├── .env.example          # template listing required env variables
