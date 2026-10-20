@@ -10,7 +10,9 @@
     "lint": "biome lint .",
     "test": "node --import tsx --test test/*.test.mjs",
     "typecheck": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev"
   },
   "keywords": [],
   "author": "",
@@ -21,12 +23,16 @@
     "@types/node": "26.4.1",
     "@types/nunjucks": "^3.2.6",
     "esbuild": "0.28.2",
+    "prisma": "^6.19.3",
     "tsx": "4.23.13",
     "typescript": "7.0.2"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "bcryptjs": "^3.0.3",
     "dotenv": "17.4.2",
     "express": "5.2.1",
-    "nunjucks": "^3.2.4"
+    "nunjucks": "^3.2.4",
+    "zod": "^4.6.7"
   }
 }

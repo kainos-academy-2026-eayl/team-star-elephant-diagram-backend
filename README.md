@@ -155,6 +155,28 @@ npm run build
 
 If your route reads a JSON request body, add `app.use(express.json({ limit: '100kb' }))` in `createApp()` before your routes.
 
+## User registration
+
+`POST /register` creates a user account.
+
+```sh
+docker compose up -d     # start local Postgres
+npm run db:migrate       # apply Prisma migrations (creates the User table)
+curl -X POST http://localhost:3000/register \
+  -H 'content-type: application/json' \
+  -d '{"email":"ada@example.com","password":"correct-horse"}'
+# 201 {"status":"created"}
+```
+
+| Status | When |
+| --- | --- |
+| `201` | Account created. Response body is `{"status":"created"}`. |
+| `400` | Body fails Zod validation (invalid email, password shorter than 8 characters or longer than 72 bytes, malformed JSON), or the email is already registered. |
+| `500` | Unexpected server error, such as the database being unavailable. |
+
+- Emails are trimmed and lower-cased, and `User.email` has a unique constraint, so the same address can't be registered twice, even by concurrent requests.
+- Passwords are hashed locally with bcrypt (cost 12) via `bcryptjs`. Only the one-way hash is stored, and no external identity provider is used.
+
 ## Configuration
 
 Environment variables are loaded from `.env` by [dotenv](https://github.com/motdotla/dotenv) at startup.
@@ -162,6 +184,7 @@ Environment variables are loaded from `.env` by [dotenv](https://github.com/motd
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PORT` | yes | Port the service listens on. The service exits at startup if it is missing or invalid. |
+| `DATABASE_URL` | yes | Postgres connection string used by Prisma, e.g. `postgresql://dev:dev@localhost:5432/app_dev`. |
 
 The server binds to `0.0.0.0` so it is reachable from outside a container. Add new variables to both your `.env` and [.env.example](.env.example).
 
