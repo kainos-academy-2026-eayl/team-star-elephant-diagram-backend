@@ -9,7 +9,10 @@ datasource db {
 
 model User {
   id           Int      @id @default(autoincrement())
+  forename     String   @db.VarChar(100)
+  surname      String   @db.VarChar(100)
   email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
 }
