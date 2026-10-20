@@ -5,8 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch --include 'src/views/**/*.njk' src/index.ts",
-    "build": "npm run typecheck && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/index.js --sourcemap && node --input-type=module -e \"import { cpSync } from 'node:fs'; cpSync('src/views', 'dist/views', { recursive: true });\"",
+    "dev": "tsx watch src/index.ts",
+    "build": "npm run typecheck && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/index.js --sourcemap",
+    "lint": "biome lint .",
     "test": "node --import tsx --test test/*.test.mjs",
     "typecheck": "tsc",
     "start": "node dist/index.js",
@@ -17,6 +18,7 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
     "@types/express": "5.0.6",
     "@types/node": "26.4.1",
     "@types/nunjucks": "^3.2.6",
