@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createRegisterRouter } from './controllers/registerController';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
 import { UserService } from './services/userService';
-import { userController } from './controllers/loginController';
+import { userController } from './controllers/userController';
 
 export interface AppDependencies {
   userRepository?: UserRepository;
