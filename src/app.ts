@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createRegisterRouter } from './controllers/registerController';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
 import { UserService } from './services/userService';
-import { createLoginRouter } from './controllers/loginController';
+import { userController } from './controllers/loginController';
 
 export interface AppDependencies {
   userRepository?: UserRepository;
@@ -33,7 +33,7 @@ export function createApp({ userRepository = prismaUserRepository }: AppDependen
 
   app.use('/register', createRegisterRouter(userService));
 
-  app.use('/login', createLoginRouter(userService));
+  app.use('/login', userController(userService));
 
   app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
     if (error instanceof SyntaxError && 'status' in error && error.status === 400) {

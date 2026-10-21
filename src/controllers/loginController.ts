@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { UserService } from '../services/userService';
 import { loginSchema } from '../validators/loginSchema';
 
-export function createLoginRouter(userService: UserService): Router {
+export function userController(userService: UserService): Router {
     const router = Router();
 
     router.post('/', async (req: Request, res: Response) => {
