@@ -9,44 +9,44 @@ import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
 
 export interface AppDependencies {
-  productCatalogueRepository?: ProductCatalogueRepository;
-  userRepository?: UserRepository;
+	productCatalogueRepository?: ProductCatalogueRepository;
+	userRepository?: UserRepository;
 }
 
 export function createApp({
-  productCatalogueRepository: catalogueRepository = productCatalogueRepository,
-  userRepository = prismaUserRepository,
+	productCatalogueRepository: catalogueRepository = productCatalogueRepository,
+	userRepository = prismaUserRepository,
 }: AppDependencies = {}): Express {
-  const app = express();
+	const app = express();
 
-  nunjucks.configure(join(import.meta.dirname, 'views'), {
-    autoescape: true,
-    express: app,
-    noCache: process.env.NODE_ENV !== 'production',
-  });
-  app.set('view engine', 'njk');
+	nunjucks.configure(join(import.meta.dirname, 'views'), {
+		autoescape: true,
+		express: app,
+		noCache: process.env.NODE_ENV !== 'production',
+	});
+	app.set('view engine', 'njk');
 
-  app.use(express.json({ limit: '100kb' }));
+	app.use(express.json({ limit: '100kb' }));
 
-  // app.get('/', (_req: Request, res: Response) => {
-  //   res.render('index');
-  // }); commented out as don't require nunjucks files for backend
+	// app.get('/', (_req: Request, res: Response) => {
+	//   res.render('index');
+	// }); commented out as don't require nunjucks files for backend
 
-  app.get('/health', (_req: Request, res: Response) => {
-    res.json({ status: 'UP', time: new Date().toISOString() });
-  });
-  const userService = new UserService(userRepository);
+	app.get('/health', (_req: Request, res: Response) => {
+		res.json({ status: 'UP', time: new Date().toISOString() });
+	});
+	const userService = new UserService(userRepository);
 
-  app.use(userController(userService));
-  app.use('/product_catalogue', createProductCatalogueRouter(new ProductCatalogueService(catalogueRepository)));
+	app.use(userController(userService));
+	app.use('/product_catalogue', createProductCatalogueRouter(new ProductCatalogueService(catalogueRepository)));
 
-  app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
-    if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
-      res.status(400).json({ error: 'Malformed JSON body' });
-      return;
-    }
-    next(error);
-  });
+	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
+		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
+			res.status(400).json({ error: 'Malformed JSON body' });
+			return;
+		}
+		next(error);
+	});
 
-  return app;
+	return app;
 }

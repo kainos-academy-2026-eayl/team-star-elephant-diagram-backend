@@ -90,6 +90,20 @@ test('POST /login still rejects invalid input through the shared user controller
   assert.ok(body.details.password)
 })
 
+for (const email of ['ada@example.com', 'unknown@example.com']) {
+  test(`POST /login rejects incorrect credentials for ${email}`, async () => {
+    await register(validBody)
+    const response = await fetch(`${baseUrl}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: 'wrong-password' }),
+    })
+
+    assert.equal(response.status, 401)
+    assert.deepEqual(await response.json(), { error: 'Invalid email or password' })
+  })
+}
+
 test('POST /register stores only a one-way argon2id hash of the password', async () => {
   await register(validBody)
   const stored = users.get('ada@example.com')

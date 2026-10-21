@@ -49,7 +49,6 @@ export function userController(userService: UserService): Router {
             res.status(401).json({
                 error: 'Invalid email or password',
             });
-            res.status(500).json({ error: 'Internal server error' });
         }
     });
 
