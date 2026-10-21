@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { after, before, beforeEach, test } from 'node:test';
-import express from 'express';
-import { createProductCatalogueRouter } from '../src/controllers/productCatalogueController.ts';
-import { ProductCatalogueService } from '../src/services/productCatalogueService.ts';
+import { createApp } from '../src/app.ts';
 
 let server;
 let baseUrl;
@@ -11,13 +9,12 @@ let products;
 let serviceError;
 
 before(async () => {
-  const app = express();
-  app.use('/product_catalogue', createProductCatalogueRouter(new ProductCatalogueService({
+  const app = createApp({ productCatalogueRepository: {
     async findAll() {
       if (serviceError) throw serviceError;
       return products;
     },
-  })));
+  } });
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
