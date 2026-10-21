@@ -18,11 +18,11 @@ model User {
 }
 
 model Product {
-  prodid      Int      @id @default(autoincrement())
+  prod_id     Int      @id @default(autoincrement())
   name        String   @db.VarChar(100)
   category    String   @db.VarChar(100)
   description String   @db.VarChar(255)
-  price       Decimal  @db.Decimal(10, 2)
+  price       Int      @db.Int
   createdAt   DateTime @default(now()) @map("created_at")
   modifiedAt  DateTime @default(now()) @updatedAt @map("modified_at")
   imageURL    String   @db.VarChar(255)
