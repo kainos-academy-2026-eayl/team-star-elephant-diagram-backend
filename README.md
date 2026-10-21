@@ -77,6 +77,33 @@ Never commit your `.env` file. It is already listed in [.gitignore](.gitignore);
 | `npm start` | `node dist/index.js` | Runs the built output. Requires `npm run build` first. |
 Before pushing, run `npm run build`, `npm run lint`, and `npm test`.
 
+## Testing user login with Bruno
+
+The [Bruno collection](bruno/bruno.json) tests `POST /login` and includes a registration
+request to create its test account.
+
+1. Start local Postgres and apply migrations using the commands under
+   [User registration](#user-registration).
+2. Run `npm run dev`.
+3. In Bruno, choose **Open Collection** and select the [bruno folder](bruno/).
+4. Select the **Local** environment. Change `baseUrl` in
+   [Local.bru](bruno/environments/Local.bru) if your API uses a different port.
+5. Run the collection in its numbered order. The first request creates a unique
+   test account and sets runtime email variables for the remaining requests.
+   Each full run creates one account in the selected database; use a development
+   or test database, not production.
+
+The requests check successful login (`200`), wrong password and unknown user
+(`401`), and invalid email, empty password, missing fields and malformed JSON
+(`400`). Each request includes assertions in Bruno's **Tests** tab.
+
+To test an existing account instead, open **Login successfully**, set `loginEmail`
+and `loginPassword` in your local Bruno environment, and send that request without
+running registration. If you already ran registration in this session, clear its
+runtime `loginEmail` variable first because runtime variables override environment
+variables. Do not commit real credentials. The login endpoint currently returns
+only `{"status":"success"}`; it does not issue a token or session.
+
 ## CI and required merge checks
 
 [The CI workflow](.github/workflows/ci.yml) runs on opened, reopened, and updated pull requests, and pushes to `main` or `master`, including merges. It uses Node from [.nvmrc](.nvmrc), installs locked dependencies, then builds, lints, and runs tests once. Any failed step fails the job.
