@@ -38,7 +38,8 @@ export function createApp({
   });
   const userService = new UserService(userRepository);
 
-  app.use('/register', createRegisterRouter(new UserService(userRepository)));
+  app.use('/register', createRegisterRouter(userService));
+  app.use('/login', userController(userService));
   app.use('/product_catalogue', createProductCatalogueRouter(new ProductCatalogueService(catalogueRepository)));
 
   app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
