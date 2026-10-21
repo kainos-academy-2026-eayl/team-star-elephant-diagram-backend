@@ -8,6 +8,9 @@ import { ARGON2_OPTIONS } from '../src/services/userService.ts'
 
 const users = new Map()
 const inMemoryUserRepository = {
+  async findByEmail(email) {
+    return users.get(email) ?? null
+  },
   async create(newUser) {
     if (users.has(newUser.email)) throw new DuplicateEmailError()
     const user = { id: users.size + 1, ...newUser }
@@ -58,6 +61,33 @@ test('POST /register passes matching created and modified timestamps to the repo
   assert.ok(createdAt instanceof Date)
   assert.ok(createdAt.getTime() >= before && createdAt.getTime() <= after)
   assert.equal(modifiedAt.getTime(), createdAt.getTime())
+})
+
+test('POST /login still authenticates a registered user through the shared user controller', async () => {
+  assert.equal((await register(validBody)).status, 201)
+
+  const response = await fetch(`${baseUrl}/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: validBody.email, password: validBody.password }),
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { status: 'Success' })
+})
+
+test('POST /login still rejects invalid input through the shared user controller', async () => {
+  const response = await fetch(`${baseUrl}/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+
+  assert.equal(response.status, 400)
+  const body = await response.json()
+  assert.equal(body.error, 'Invalid login details')
+  assert.ok(body.details.email)
+  assert.ok(body.details.password)
 })
 
 test('POST /register stores only a one-way argon2id hash of the password', async () => {

@@ -186,6 +186,8 @@ If your route reads a JSON request body, add `app.use(express.json({ limit: '100
 
 `POST /register` creates a user account.
 
+Registration and login routes are defined together in [src/controllers/userController.ts](src/controllers/userController.ts).
+
 ```sh
 docker compose up -d     # start local Postgres
 npm run db:migrate       # apply Prisma migrations (creates the User table)

@@ -2,7 +2,6 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
 import { createProductCatalogueRouter } from './controllers/productCatalogueController';
-import { createRegisterRouter } from './controllers/registerController';
 import { productCatalogueRepository, type ProductCatalogueRepository } from './repositories/productCatalogueRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
 import { ProductCatalogueService } from './services/productCatalogueService';
@@ -38,8 +37,7 @@ export function createApp({
   });
   const userService = new UserService(userRepository);
 
-  app.use('/register', createRegisterRouter(userService));
-  app.use('/login', userController(userService));
+  app.use(userController(userService));
   app.use('/product_catalogue', createProductCatalogueRouter(new ProductCatalogueService(catalogueRepository)));
 
   app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
