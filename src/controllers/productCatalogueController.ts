@@ -9,7 +9,7 @@ export function createProductCatalogueRouter(productCatalogueService: ProductCat
       const products = await productCatalogueService.getProducts();
       res.status(200).json(products);
     } catch (error) {
-      console.error('Product catalogue retrieval failed', error);
+      console.error('Product catalogue retrieval failed.', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
