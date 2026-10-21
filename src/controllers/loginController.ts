@@ -21,7 +21,7 @@ export function userController(userService: UserService): Router {
             await userService.login(parsed.data);
 
             res.status(200).json({
-                status: 'success',
+                status: 'Success',
             });
         } catch (error) {
             res.status(401).json({
