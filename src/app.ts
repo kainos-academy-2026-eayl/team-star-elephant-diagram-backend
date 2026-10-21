@@ -7,6 +7,7 @@ import { productCatalogueRepository, type ProductCatalogueRepository } from './r
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
 import { ProductCatalogueService } from './services/productCatalogueService';
 import { UserService } from './services/userService';
+import { userController } from './controllers/userController';
 
 export interface AppDependencies {
   productCatalogueRepository?: ProductCatalogueRepository;
@@ -35,6 +36,7 @@ export function createApp({
   app.get('/health', (_req: Request, res: Response) => {
     res.json({ status: 'UP', time: new Date().toISOString() });
   });
+  const userService = new UserService(userRepository);
 
   app.use('/register', createRegisterRouter(new UserService(userRepository)));
   app.use('/product_catalogue', createProductCatalogueRouter(new ProductCatalogueService(catalogueRepository)));
