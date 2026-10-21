@@ -14,8 +14,7 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
-    "db:deploy": "prisma migrate deploy",
-    "db:seed": "prisma db seed"
+    "db:deploy": "prisma migrate deploy"
   },
   "keywords": [],
   "author": "",
@@ -34,7 +33,7 @@
     "@prisma/client": "^6.19.3",
     "argon2": "^0.45.1",
     "dotenv": "17.4.2",
-    "express": "5.2.1",
+    "express": "^5.2.1",
     "nunjucks": "^3.2.4",
     "zod": "^4.6.7"
   },

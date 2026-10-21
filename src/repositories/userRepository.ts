@@ -13,10 +13,16 @@ export interface NewUser {
 export interface CreatedUser {
   id: number;
   forename: string;
-  surname: string;
+  surname: string;  
   email: string;
   createdAt: Date;
   modifiedAt: Date;
+}
+
+export interface User {
+  id: number;
+  email: string;
+  passwordHash: string;
 }
 
 export class DuplicateEmailError extends Error {
@@ -28,6 +34,7 @@ export class DuplicateEmailError extends Error {
 
 export interface UserRepository {
   create(user: NewUser): Promise<CreatedUser>;
+  findByEmail(email: string): Promise<User | null>;
 }
 
 export const prismaUserRepository: UserRepository = {
@@ -44,5 +51,10 @@ export const prismaUserRepository: UserRepository = {
       }
       throw error;
     }
+  },
+  async findByEmail(email: string) {
+    return prisma.user.findUnique({
+      where: { email },
+    });
   },
 };
