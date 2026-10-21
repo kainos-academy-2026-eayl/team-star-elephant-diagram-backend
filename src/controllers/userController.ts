@@ -1,12 +1,34 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { DuplicateEmailError } from '../repositories/userRepository';
 import type { UserService } from '../services/userService';
 import { loginSchema } from '../validators/loginSchema';
+import { registerSchema } from '../validators/registerSchema';
 
 export function userController(userService: UserService): Router {
     const router = Router();
 
-    router.post('/', async (req: Request, res: Response) => {
+    router.post('/register', async (req: Request, res: Response) => {
+        const parsed = registerSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ error: 'Invalid registration details', details: z.flattenError(parsed.error).fieldErrors });
+            return;
+        }
+
+        try {
+            await userService.register(parsed.data);
+            res.status(201).json({ status: 'created' });
+        } catch (error) {
+            if (error instanceof DuplicateEmailError) {
+                res.status(400).json({ error: error.message });
+                return;
+            }
+            console.error('Registration failed', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+
+    router.post('/login', async (req: Request, res: Response) => {
         const parsed = loginSchema.safeParse(req.body);
 
         if (!parsed.success) {
@@ -33,4 +55,3 @@ export function userController(userService: UserService): Router {
 
     return router;
 }
-
