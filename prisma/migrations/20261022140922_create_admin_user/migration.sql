@@ -1,6 +1,6 @@
 -- CreateTable
 CREATE TABLE "AdminUser" (
-    "AdminID" SERIAL NOT NULL,
+    "adminID" SERIAL NOT NULL,
     "forename" VARCHAR(100) NOT NULL,
     "surname" VARCHAR(100) NOT NULL,
     "email" TEXT NOT NULL,
@@ -9,7 +9,7 @@ CREATE TABLE "AdminUser" (
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "modified_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "AdminUser_pkey" PRIMARY KEY ("AdminID")
+    CONSTRAINT "AdminUser_pkey" PRIMARY KEY ("adminID")
 );
 
 -- CreateIndex

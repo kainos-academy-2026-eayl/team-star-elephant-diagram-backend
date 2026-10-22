@@ -29,7 +29,7 @@ model Product {
 }
 
 model AdminUser {
-  AdminID      Int      @id @default(autoincrement())
+  adminID      Int      @id @default(autoincrement())
   forename     String   @db.VarChar(100)
   surname      String   @db.VarChar(100)
   email        String   @unique
