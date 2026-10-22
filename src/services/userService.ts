@@ -1,5 +1,6 @@
 import argon2 from 'argon2';
-import type { CreatedUser, UserRepository } from '../repositories/userRepository';
+import type { CreatedUser } from '../models/user';
+import type { UserRepository } from '../repositories/userRepository';
 import type { RegisterInput } from '../validators/registerSchema';
 import type { LoginRequest } from '../validators/loginSchema';
 
