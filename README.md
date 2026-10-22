@@ -205,7 +205,7 @@ Registration and login routes are defined together in [src/controllers/userContr
 ```sh
 docker compose up -d     # start local Postgres
 npm run db:migrate       # apply Prisma migrations (creates the User table)
-curl -X POST http://localhost:3000/register \
+curl -X POST http://localhost:3001/register \
   -H 'content-type: application/json' \
   -d '{"forename":"Ada","surname":"Lovelace","email":"ada@example.com","password":"correct-horse"}'
 # 201 {"status":"created"}
