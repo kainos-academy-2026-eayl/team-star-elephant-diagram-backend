@@ -1,20 +1,20 @@
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
-import { createProductCatalogueRouter } from './controllers/productCatalogueController';
-import { productCatalogueRepository, type ProductCatalogueRepository } from './repositories/productCatalogueRepository';
+import { createProductRouter } from './controllers/productController';
+import { productRepository, type ProductRepository } from './repositories/productRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
-import { ProductCatalogueService } from './services/productCatalogueService';
+import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
 
 export interface AppDependencies {
-	productCatalogueRepository?: ProductCatalogueRepository;
+	productRepository?: ProductRepository;
 	userRepository?: UserRepository;
 }
 
 export function createApp({
-	productCatalogueRepository: catalogueRepository = productCatalogueRepository,
+	productRepository: productsRepository = productRepository,
 	userRepository = prismaUserRepository,
 }: AppDependencies = {}): Express {
 	const app = express();
@@ -38,7 +38,7 @@ export function createApp({
 	const userService = new UserService(userRepository);
 
 	app.use(userController(userService));
-	app.use('/product_catalogue', createProductCatalogueRouter(new ProductCatalogueService(catalogueRepository)));
+	app.use('/products', createProductRouter(new ProductService(productsRepository)));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
