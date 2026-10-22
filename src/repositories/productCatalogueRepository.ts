@@ -1,7 +1,8 @@
+import type { Product } from '../models/product';
 import prisma from '../prismaClient';
 
 export interface ProductCatalogueRepository {
-  findAll(): Promise<readonly unknown[]>;
+  findAll(): Promise<readonly Product[]>;
 }
 
 export const productCatalogueRepository: ProductCatalogueRepository = {

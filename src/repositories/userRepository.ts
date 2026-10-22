@@ -1,29 +1,6 @@
 import { Prisma } from '@prisma/client';
+import type { CreatedUser, NewUser, User } from '../models/user';
 import prisma from '../prismaClient';
-
-export interface NewUser {
-  forename: string;
-  surname: string;
-  email: string;
-  passwordHash: string;
-  createdAt: Date;
-  modifiedAt: Date;
-}
-
-export interface CreatedUser {
-  id: number;
-  forename: string;
-  surname: string;  
-  email: string;
-  createdAt: Date;
-  modifiedAt: Date;
-}
-
-export interface User {
-  id: number;
-  email: string;
-  passwordHash: string;
-}
 
 export class DuplicateEmailError extends Error {
   constructor() {
