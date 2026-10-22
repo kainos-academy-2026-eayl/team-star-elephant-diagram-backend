@@ -55,7 +55,7 @@ with `npm run db:deploy`, then start the backend with `npm run dev`.
 The frontend's `.env` needs `API_BASE_URL=http://localhost:3001`.
 
 The frontend server forwards registration and login as JSON to `POST /register`
-and `POST /login`, and loads products from `GET /product_catalogue`.
+and `POST /login`, and loads products from `GET /products`.
 The catalogue reads the Prisma `Product` table; an empty table returns `[]`.
 Prices are stored as decimal pounds and returned as JSON numbers, displayed as GBP.
 Login validates credentials only: it does not create a session or protect the
