@@ -39,13 +39,27 @@ npm run dev        # start the service with hot reload
 Then in another terminal:
 
 ```sh
-curl http://localhost:3000/health
+curl http://localhost:3001/health
 # {"status":"UP","time":"2026-10-15T14:30:00.000Z"}
-curl http://localhost:3000/
+curl http://localhost:3001/
 # 404 Not Found
 ```
 
 The health check's `time` is the current UTC time in ISO 8601 format.
+
+## Frontend integration
+
+Run this API on port `3001` and the sibling frontend on port `3000`.
+Start PostgreSQL with `docker compose up -d`, apply the checked-in migrations
+with `npm run db:deploy`, then start the backend with `npm run dev`.
+The frontend's `.env` needs `API_BASE_URL=http://localhost:3001`.
+
+The frontend server forwards registration and login as JSON to `POST /register`
+and `POST /login`, and loads products from `GET /product_catalogue`.
+The catalogue reads the Prisma `Product` table; an empty table returns `[]`.
+Prices are stored as decimal pounds and returned as JSON numbers, displayed as GBP.
+Login validates credentials only: it does not create a session or protect the
+catalogue. Basket operations are not implemented by this API.
 
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
 

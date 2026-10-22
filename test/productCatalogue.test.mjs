@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { Prisma } from '@prisma/client';
 import { once } from 'node:events';
 import { after, before, beforeEach, test } from 'node:test';
 import { createApp } from '../src/app.ts';
+import prisma from '../src/prismaClient.ts';
+import { productCatalogueRepository } from '../src/repositories/productCatalogueRepository.ts';
 
 let server;
 let baseUrl;
@@ -27,6 +30,17 @@ after(() => new Promise((resolve, reject) => {
 beforeEach(() => {
   products = [];
   serviceError = undefined;
+});
+
+test('the default catalogue repository reads stored products in ID order', async (t) => {
+  const storedProducts = [{ prod_id: 1, name: 'Stored product', price: new Prisma.Decimal('12.99') }];
+  const originalFindMany = prisma.product.findMany;
+  const findMany = t.mock.fn(async () => storedProducts);
+  prisma.product.findMany = findMany;
+  t.after(() => { prisma.product.findMany = originalFindMany; });
+
+  assert.deepEqual(await productCatalogueRepository.findAll(), [{ prod_id: 1, name: 'Stored product', price: 12.99 }]);
+  assert.deepEqual(findMany.mock.calls[0].arguments, [{ orderBy: { prod_id: 'asc' } }]);
 });
 
 test('GET /product_catalogue returns the products from the service', async () => {
