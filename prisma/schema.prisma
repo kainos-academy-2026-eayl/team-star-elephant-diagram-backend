@@ -27,3 +27,14 @@ model Product {
   modifiedAt  DateTime @default(now()) @updatedAt @map("modified_at")
   imageURL    String   @map("image") @db.VarChar(255)
 }
+
+model AdminUser {
+  adminID      Int      @id @default(autoincrement())
+  forename     String   @db.VarChar(100)
+  surname      String   @db.VarChar(100)
+  email        String   @unique
+  role         String   @db.VarChar(50)
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+}
