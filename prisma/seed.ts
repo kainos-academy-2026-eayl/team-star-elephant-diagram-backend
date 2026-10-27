@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import { products } from './products';
+import { adminUsers } from './adminUsers';
 
 const prisma = new PrismaClient();
 
@@ -143,6 +144,17 @@ async function main() {
         console.log(`${result.count} products seeded`);
     } else {
         console.log('Products already exist, skipping seed');
+    }
+
+    if ((await prisma.adminUser.count()) === 0) {
+        const result = await prisma.adminUser.createMany({
+            data: adminUsers,
+            skipDuplicates: true,
+        });
+
+        console.log(`${result.count} admin users seeded`);
+    } else {
+        console.log('Admin users already exist, skipping seed');
     }
 }
 main()
