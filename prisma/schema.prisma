@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -6,30 +7,42 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
 model User {
-  id           Int      @id @default(autoincrement())
+  userId           Int      @id @default(autoincrement())
   forename     String   @db.VarChar(100)
   surname      String   @db.VarChar(100)
   email        String   @unique
   passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at")
   modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+  orders         Order[]
 }
 
 model Product {
-  prod_id     Int      @id @default(autoincrement()) @map("prodid")
+  productId     Int      @id @default(autoincrement()) @map("prodid")
   name        String   @db.VarChar(100)
   category    String   @default("Uncategorised") @db.VarChar(100)
   description String   @db.VarChar(255)
   price       Decimal  @db.Decimal(10, 2)
   createdAt   DateTime @default(now()) @map("created_at")
   modifiedAt  DateTime @default(now()) @updatedAt @map("modified_at")
-  imageURL    String   @map("image") @db.VarChar(255)
+  imageUrl    String   @map("image") @db.VarChar(255)
+  suppliers    ProductSupplier[]
+  inventory    Inventory[]
+  orderItems   OrderItem[]
+
+  @@index([name])
 }
 
 model AdminUser {
-  adminID      Int      @id @default(autoincrement())
+  adminId      Int      @id @default(autoincrement())
   forename     String   @db.VarChar(100)
   surname      String   @db.VarChar(100)
   email        String   @unique
@@ -37,4 +50,51 @@ model AdminUser {
   passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at")
   modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+}
+model Inventory {
+  inventoryId  Int      @id @default(autoincrement()) @map("inventory_id")
+  quantity     Int      @default(0)
+  maximumQuantity     Int      @default(0) @map("qty_limit")
+  reorderLevel  Int      @default(0) @map("reorder_level")
+  modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+  marketValue  Decimal  @db.Decimal(10, 2) @map("market_value")
+  productId    Int      @map("product_id") 
+  product     Product   @relation(fields: [productId], references: [productId])
+  supplierId    Int      @map("supplier_id")
+  supplier     Supplier  @relation(fields: [supplierId], references: [supplierId])
+}
+model Order {
+  orderId      Int      @id @default(autoincrement()) @map("order_id")
+  orderPlacedAt DateTime @default(now()) @map("order_placed_at")
+  orderStatus   OrderStatus   @default(PENDING) @map("order_status")
+  cost        Decimal  @db.Decimal(10, 2) @map("cost")
+  modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+  userId       Int      
+  user        User     @relation(fields: [userId], references: [userId])
+  orderItems   OrderItem[] 
+
+  @@index([orderStatus])
+}
+model Supplier {
+  supplierId   Int      @id @default(autoincrement()) @map("supplier_id")
+  name        String   @unique @db.VarChar(100)
+  products     ProductSupplier[] 
+  email       String   @unique @db.VarChar(100) @map("email")
+  address     String   @db.VarChar(255)
+  inventory    Inventory[]
+}
+model ProductSupplier {
+  productId  Int  
+  supplierId Int      
+  product    Product  @relation(fields: [productId], references: [productId])
+  supplier   Supplier @relation(fields: [supplierId], references: [supplierId])
+  @@id([productId, supplierId])
+}
+model OrderItem {
+  orderId   Int
+  productId Int
+  quantity  Int      @default(1)
+  order     Order    @relation(fields: [orderId], references: [orderId])
+  product   Product  @relation(fields: [productId], references: [productId])
+  @@id([orderId, productId])
 }
