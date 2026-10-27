@@ -61,6 +61,25 @@ Prices are stored as decimal pounds and returned as JSON numbers, displayed as G
 Login validates credentials only: it does not create a session or protect the
 catalogue. Basket operations are not implemented by this API.
 
+### Seed the product catalogue
+
+After configuring `DATABASE_URL` and applying migrations, run:
+
+```sh
+npm run db:seed
+```
+
+The seed inserts 50 fictional hardware products: ten each in Laptops, Monitors,
+Keyboards, Mice and Headsets. [prisma/products.ts](prisma/products.ts) exports a
+typed array suitable for `prisma.product.createMany({ data: products })`.
+Prices are representative GBP amounts, not live retail offers. Unsplash category
+stock photos are shared within each category and illustrate the hardware type;
+they are not photographs of the exact products.
+
+Products are inserted only when the product table is empty. Existing products
+are left unchanged, so an existing catalogue (including the old sample products)
+will not be replaced or topped up. The existing user seed is preserved.
+
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
 
 ## Making it your own
