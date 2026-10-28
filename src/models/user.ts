@@ -8,7 +8,7 @@ export interface NewUser {
 }
 
 export interface CreatedUser {
-  id: number;
+  userId: number;
   forename: string;
   surname: string;
   email: string;
@@ -17,7 +17,7 @@ export interface CreatedUser {
 }
 
 export interface User {
-  id: number;
+  userId: number;
   email: string;
   passwordHash: string;
 }
