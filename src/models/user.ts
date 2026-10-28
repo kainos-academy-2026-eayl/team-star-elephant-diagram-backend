@@ -5,6 +5,9 @@ export interface NewUser {
   passwordHash: string;
   createdAt: Date;
   modifiedAt: Date;
+  address: string;
+  city: string;
+  postcode: string;
 }
 
 export interface CreatedUser {
@@ -14,6 +17,9 @@ export interface CreatedUser {
   email: string;
   createdAt: Date;
   modifiedAt: Date;
+  address: string;
+  city: string;
+  postcode: string;
 }
 
 export interface User {

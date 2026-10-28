@@ -15,11 +15,11 @@ export interface UserRepository {
 }
 
 export const prismaUserRepository: UserRepository = {
-  async create({ forename, surname, email, passwordHash, createdAt, modifiedAt }) {
+  async create({ forename, surname, email, passwordHash, createdAt, modifiedAt, address, city, postcode }) {
     try {
       return await prisma.user.create({
-        data: { forename, surname, email, passwordHash, createdAt, modifiedAt },
-        select: { userId: true, forename: true, surname: true, email: true, createdAt: true, modifiedAt: true },
+        data: { forename, surname, email, passwordHash, createdAt, modifiedAt, address, city, postcode },
+        select: { userId: true, forename: true, surname: true, email: true, createdAt: true, modifiedAt: true, address: true, city: true, postcode: true },
       });
     } catch (error) {
       // P2002 = unique constraint violation; the DB constraint is the source of truth so concurrent requests can't create duplicates
