@@ -30,7 +30,6 @@ export function userController(userService: UserService): Router {
 
     router.post('/login', async (req: Request, res: Response) => {
         const parsed = loginSchema.safeParse(req.body);
-
         if (!parsed.success) {
             res.status(400).json({
                 error: 'Invalid login details',
@@ -38,12 +37,11 @@ export function userController(userService: UserService): Router {
             });
             return;
         }
-
         try {
-            await userService.login(parsed.data);
-
+            const token = await userService.login(parsed.data);
             res.status(200).json({
                 status: 'Success',
+                token,
             });
         } catch (error) {
             res.status(401).json({
