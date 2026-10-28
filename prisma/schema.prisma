@@ -7,29 +7,54 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  PAYPAL
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
 model User {
-  id           Int      @id @default(autoincrement())
-  forename     String   @db.VarChar(100)
-  surname      String   @db.VarChar(100)
-  email        String   @unique
-  passwordHash String   @map("password_hash")
-  createdAt    DateTime @default(now()) @map("created_at")
-  modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+  userId         Int             @id @unique @default(autoincrement())
+  forename       String          @db.VarChar(100)
+  surname        String          @db.VarChar(100)
+  email          String          @unique
+  passwordHash   String          @map("password_hash")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  modifiedAt     DateTime        @default(now()) @updatedAt @map("modified_at")
+  addressLine1   String          @db.VarChar(255)
+  addressLine2   String          @db.VarChar(255)
+  city           String          @db.VarChar(100)
+  postcode       String          @db.VarChar(10)
+  orders         Order[]
+  paymentDetails PaymentDetail[]
 }
 
 model Product {
-  prod_id     Int      @id @default(autoincrement()) @map("prodid")
-  name        String   @db.VarChar(100)
-  category    String   @default("Uncategorised") @db.VarChar(100)
-  description String   @db.VarChar(255)
-  price       Decimal  @db.Decimal(10, 2)
-  createdAt   DateTime @default(now()) @map("created_at")
-  modifiedAt  DateTime @default(now()) @updatedAt @map("modified_at")
-  imageURL    String   @map("image") @db.VarChar(255)
+  productId   Int               @id @unique @default(autoincrement()) @map("prodid")
+  name        String            @db.VarChar(100)
+  category    String            @default("Uncategorised") @db.VarChar(100)
+  description String            @db.VarChar(255)
+  price       Decimal           @db.Decimal(10, 2)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  modifiedAt  DateTime          @default(now()) @updatedAt @map("modified_at")
+  imageURL    String            @map("image") @db.VarChar(255)
+  suppliers   ProductSupplier[]
+  inventory   Inventory[]
+  orderItems  OrderItem[]
+
+  @@index([name])
 }
 
 model AdminUser {
-  adminID      Int      @id @default(autoincrement())
+  adminId      Int      @id @default(autoincrement())
   forename     String   @db.VarChar(100)
   surname      String   @db.VarChar(100)
   email        String   @unique
@@ -37,4 +62,68 @@ model AdminUser {
   passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at")
   modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+}
+
+model Inventory {
+  inventoryId     Int      @id @unique @default(autoincrement()) @map("inventory_id")
+  quantity        Int      @default(0)
+  maximumQuantity Int      @default(0) @map("qty_limit")
+  reorderLevel    Int      @default(0) @map("reorder_level")
+  modifiedAt      DateTime @default(now()) @updatedAt @map("modified_at")
+  marketValue     Decimal  @map("market_value") @db.Decimal(10, 2)
+  productId       Int      @map("product_id")
+  product         Product  @relation(fields: [productId], references: [productId])
+  supplierId      Int      @map("supplier_id")
+  supplier        Supplier @relation(fields: [supplierId], references: [supplierId])
+}
+
+model Order {
+  orderId       Int         @id @unique @default(autoincrement()) @map("order_id")
+  orderPlacedAt DateTime    @default(now()) @map("order_placed_at")
+  orderStatus   OrderStatus @default(PENDING) @map("order_status")
+  cost          Decimal     @map("cost") @db.Decimal(10, 2)
+  modifiedAt    DateTime    @default(now()) @updatedAt @map("modified_at")
+  userId        Int
+  user          User        @relation(fields: [userId], references: [userId])
+  orderItems    OrderItem[]
+
+  @@index([orderStatus])
+}
+
+model Supplier {
+  supplierId Int               @id @default(autoincrement()) @map("supplier_id")
+  name       String            @unique @db.VarChar(100)
+  products   ProductSupplier[]
+  email      String            @unique @map("email") @db.VarChar(100)
+  address    String            @db.VarChar(255)
+  inventory  Inventory[]
+}
+
+model ProductSupplier {
+  productId  Int
+  supplierId Int
+  product    Product  @relation(fields: [productId], references: [productId])
+  supplier   Supplier @relation(fields: [supplierId], references: [supplierId])
+
+  @@id([productId, supplierId])
+}
+
+model OrderItem {
+  orderId   Int
+  productId Int
+  quantity  Int     @default(1)
+  order     Order   @relation(fields: [orderId], references: [orderId])
+  product   Product @relation(fields: [productId], references: [productId])
+
+  @@id([orderId, productId])
+}
+
+model PaymentDetail {
+  paymentId      Int           @id @unique @default(autoincrement()) @map("payment_id")
+  paymentMethod  PaymentMethod @map("payment_method")
+  cardName       String        @map("card_name") @db.VarChar(100)
+  cardNumber     String        @map("card_number") @db.VarChar(16)
+  expirationDate String        @map("expiration_date") @db.VarChar(7)
+  user           User?         @relation(fields: [userUserId], references: [userId])
+  userUserId     Int?
 }

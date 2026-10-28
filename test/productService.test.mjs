@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { ProductService } from '../src/services/productService.ts'
 
 test('getProducts calls the repository once and returns its products unchanged', async () => {
-  const products = [{ id: 1, name: 'Example product' }]
+  const products = [{ productId: 1, name: 'Example product' }]
   let calls = 0
   const service = new ProductService({
     async findAll() {

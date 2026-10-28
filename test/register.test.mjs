@@ -13,7 +13,7 @@ const inMemoryUserRepository = {
   },
   async create(newUser) {
     if (users.has(newUser.email)) throw new DuplicateEmailError()
-    const user = { id: users.size + 1, ...newUser }
+    const user = { productId: users.size + 1, ...newUser }
     users.set(user.email, user)
     const { passwordHash: _passwordHash, ...createdUser } = user
     return createdUser
