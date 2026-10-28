@@ -1,5 +1,5 @@
 export interface AdminUser {
-    adminID: number;
+    adminId: number;
     forename: string;
     surname: string;
     email: string;
