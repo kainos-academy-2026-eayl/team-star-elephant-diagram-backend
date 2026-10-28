@@ -29,7 +29,8 @@ model User {
   passwordHash   String          @map("password_hash")
   createdAt      DateTime        @default(now()) @map("created_at")
   modifiedAt     DateTime        @default(now()) @updatedAt @map("modified_at")
-  address        String          @db.VarChar(255)
+  addressLine1   String          @db.VarChar(255)
+  addressLine2   String        @db.VarChar(255)
   city           String          @db.VarChar(100)
   postcode       String          @db.VarChar(10)
   orders         Order[]

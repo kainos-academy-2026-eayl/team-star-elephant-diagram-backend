@@ -12,7 +12,8 @@ async function main() {
             surname: 'Carter',
             email: 'amelia.carter@example.com',
             passwordHash: 'dummy-hash',
-            address: '58 Ullswater Avenue',
+            addressLine1: '58 Ullswater Avenue',
+            addressLine2: '',
             city: 'London',
             postcode: 'NW3 5QX'
 
@@ -22,7 +23,8 @@ async function main() {
             surname: 'Hughes',
             email: 'oliver.hughes@example.com',
             passwordHash: 'dummy-hash',
-            address: '6 Glan Y Nant Road',
+            addressLine1: '6 Glan Y Nant Road',
+            addressLine2: '',
             city: 'Cardiff',
             postcode: 'CF14 3AA'
         },
@@ -31,7 +33,8 @@ async function main() {
             surname: 'Thompson',
             email: 'isla.thompson@example.com',
             passwordHash: 'dummy-hash',
-            address: '6 Edward Road',
+            addressLine1: '6 Edward Road',
+            addressLine2: '',
             city: 'Manchester',
             postcode: 'M14 4AB'
         },
@@ -40,7 +43,8 @@ async function main() {
             surname: 'Patel',
             email: 'george.patel@example.com',
             passwordHash: 'dummy-hash',
-            address: '20 Heol Fargoed, Bargoed',
+            addressLine1: '20 Heol Fargoed, Bargoed',
+            addressLine2: '',
             city: 'Bargoed',
             postcode: 'CF81 8AA'
         },
@@ -49,7 +53,8 @@ async function main() {
             surname: 'Williams',
             email: 'freya.williams@example.com',
             passwordHash: 'dummy-hash',
-            address: 'Kilpin Court, Lobley Street',
+            addressLine1: 'Kilpin Court, Lobley Street',
+            addressLine2: '',
             city: 'Liverpool',
             postcode: 'L1 8JQ'
         },
@@ -58,7 +63,8 @@ async function main() {
             surname: 'Clarke',
             email: 'noah.clarke@example.com',
             passwordHash: 'dummy-hash',
-            address: '16 Haverfield Gardens',
+            addressLine1: '16 Haverfield Gardens',
+            addressLine2: '',
             city: 'Bristol',
             postcode: 'BS8 1TH'
         },
@@ -67,7 +73,8 @@ async function main() {
             surname: 'Robinson',
             email: 'poppy.robinson@example.com',
             passwordHash: 'dummy-hash',
-            address: '3 Chalk Road',
+            addressLine1: '3 Chalk Road',
+            addressLine2: '',
             city: 'Oxford',
             postcode: 'OX1 4AJ'
         },
@@ -76,7 +83,8 @@ async function main() {
             surname: 'Davies',
             email: 'arthur.davies@example.com',
             passwordHash: 'dummy-hash',
-            address: '8 Sir Henry Jake Close',
+            addressLine1: '8 Sir Henry Jake Close',
+            addressLine2: '',
             city: 'Cardiff',
             postcode: 'CF14 3AA'
         },
@@ -85,7 +93,8 @@ async function main() {
             surname: 'Singh',
             email: 'maya.singh@example.com',
             passwordHash: 'dummy-hash',
-            address: 'Cornwall Gardens Court',
+            addressLine1: 'Cornwall Gardens Court',
+            addressLine2: '',
             city: 'London',
             postcode: 'SW7 2AZ'
         },
@@ -94,7 +103,8 @@ async function main() {
             surname: 'Wilson',
             email: 'harry.wilson@example.com',
             passwordHash: 'dummy-hash',
-            address: '6 Emley House',
+            addressLine1: '6 Emley House',
+            addressLine2: '',
             city: 'Leeds',
             postcode: 'LS1 4AB'
         },
@@ -103,7 +113,8 @@ async function main() {
             surname: 'Bennett',
             email: 'grace.bennett@example.com',
             passwordHash: 'dummy-hash',
-            address: '241 Heneage Street',
+            addressLine1: '241 Heneage Street',
+            addressLine2: '',
             city: 'Sheffield',
             postcode: 'S3 7QJ'
         },
@@ -112,7 +123,8 @@ async function main() {
             surname: "O'Connor",
             email: 'jack.oconnor@example.com',
             passwordHash: 'dummy-hash',
-            address: 'Westside, Meadow View',
+            addressLine1: 'Westside, Meadow View',
+            addressLine2: '',
             city: 'Dublin',
             postcode: 'D02 X285'
         },
@@ -121,7 +133,8 @@ async function main() {
             surname: 'Walker',
             email: 'evie.walker@example.com',
             passwordHash: 'dummy-hash',
-            address: 'Morina, Llanarth',
+            addressLine1: 'Morina, Llanarth',
+            addressLine2: '',
             city: 'Carmarthenshire',
             postcode: 'SA32 8QH'
         },
@@ -130,7 +143,8 @@ async function main() {
             surname: 'Khan',
             email: 'muhammad.khan@example.com',
             passwordHash: 'dummy-hash',
-            address: 'Millfield Road',
+            addressLine1: 'Millfield Road',
+            addressLine2: '',
             city: 'Manchester',
             postcode: 'M14 4AB'
         },
@@ -139,7 +153,8 @@ async function main() {
             surname: 'Wright',
             email: 'sophie.wright@example.com',
             passwordHash: 'dummy-hash',
-            address: '',
+            addressLine1: '',
+            addressLine2: '',
             city: '',
             postcode: ''
         },
@@ -148,7 +163,8 @@ async function main() {
             surname: 'Morgan',
             email: 'leo.morgan@example.com',
             passwordHash: 'dummy-hash',
-            address: 'Grange Barn',
+            addressLine1: 'Grange Barn',
+            addressLine2: '',
             city: 'Bath',
             postcode: 'BA1 2AA'
         },
@@ -157,7 +173,8 @@ async function main() {
             surname: 'Evans',
             email: 'charlotte.evans@example.com',
             passwordHash: 'dummy-hash',
-            address: '160 Sidwell Street',
+            addressLine1: '160 Sidwell Street',
+            addressLine2: '',
             city: 'Exeter',
             postcode: 'EX4 6PX'
         },
@@ -166,7 +183,8 @@ async function main() {
             surname: 'Brown',
             email: 'alfie.brown@example.com',
             passwordHash: 'dummy-hash',
-            address: '14 Poppy Gardens',
+            addressLine1: '14 Poppy Gardens',
+            addressLine2: '',
             city: 'London',
             postcode: 'E1 6AN'
         },
@@ -175,7 +193,8 @@ async function main() {
             surname: 'Ahmed',
             email: 'aisha.ahmed@example.com',
             passwordHash: 'dummy-hash',
-            address: '45 Hays Walk',
+            addressLine1: '45 Hays Walk',
+            addressLine2: '',
             city: 'London',
             postcode: 'E1 8QS'
         },
@@ -184,7 +203,8 @@ async function main() {
             surname: 'Lewis',
             email: 'theodore.lewis@example.com',
             passwordHash: 'dummy-hash',
-            address: '4 Tithe Barn Road',
+            addressLine1: '4 Tithe Barn Road',
+            addressLine2: '',
             city: 'Oxford',
             postcode: 'OX1 3DP'
         },
