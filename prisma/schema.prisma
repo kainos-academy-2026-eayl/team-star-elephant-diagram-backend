@@ -124,6 +124,6 @@ model PaymentDetail {
   cardName       String        @map("card_name") @db.VarChar(100)
   cardNumber     String        @map("card_number") @db.VarChar(16)
   expirationDate String        @map("expiration_date") @db.VarChar(7)
-  user           User          @relation(fields: [UserId], references: [userId])
-  UserId     Int
+  user           User          @relation(fields: [userId], references: [userId])
+  userId     Int
 }

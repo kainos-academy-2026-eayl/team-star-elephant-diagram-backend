@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { z } from 'zod';
 
 const name = (label: string) =>
   z
@@ -6,7 +6,7 @@ const name = (label: string) =>
     .trim()
     .uppercase()
     .min(1, `${label} is required`)
-    .max(20, `${label} must be at most 20 characters`)
+    .max(20, `${label} must be at most 20 characters`);
 
 export const registerSchema = z.object({
   nameoncard: name('Name on Card'),
@@ -25,8 +25,16 @@ export const registerSchema = z.object({
   expirydate: z
     .string()
     .trim()
-    .regex(/^(0[1-9]|1[0-2])\/\d{2}$/, 'Expiration date must be in MM/YY format'),
-  
-})
+    .regex(/^(0[1-9]|1[0-2])\/\d{2}$/, 'Expiration date must be in MM/YY format')
+    .refine((value) => {
+      const [month, year] = value.split('/').map(Number);
+      const now = new Date();
+      return (
+        2000 + year > now.getFullYear() ||
+        (2000 + year === now.getFullYear() && month >= now.getMonth() + 1)
+      );
+    }, 'Card has expired'),
 
-export type RegisterInput = z.infer<typeof registerSchema>
+});
+
+export type RegisterInput = z.infer<typeof registerSchema>;
