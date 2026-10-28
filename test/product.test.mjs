@@ -33,18 +33,18 @@ beforeEach(() => {
 });
 
 test('the default product repository reads stored products in ID order', async (t) => {
-  const storedProducts = [{ prod_id: 1, name: 'Stored product', price: new Prisma.Decimal('12.99') }];
+  const storedProducts = [{ productId: 1, name: 'Stored product', price: new Prisma.Decimal('12.99') }];
   const originalFindMany = prisma.product.findMany;
   const findMany = t.mock.fn(async () => storedProducts);
   prisma.product.findMany = findMany;
   t.after(() => { prisma.product.findMany = originalFindMany; });
 
-  assert.deepEqual(await productRepository.findAll(), [{ prod_id: 1, name: 'Stored product', price: 12.99 }]);
-  assert.deepEqual(findMany.mock.calls[0].arguments, [{ orderBy: { prod_id: 'asc' } }]);
+  assert.deepEqual(await productRepository.findAll(), [{ productId: 1, name: 'Stored product', price: 12.99 }]);
+  assert.deepEqual(findMany.mock.calls[0].arguments, [{ orderBy: { productId: 'asc' } }]);
 });
 
 test('GET /products returns the products from the service', async () => {
-  products = [{ id: 1, name: 'Example product' }];
+  products = [{ productId: 1, name: 'Example product' }];
 
   const response = await fetch(`${baseUrl}/products`);
 

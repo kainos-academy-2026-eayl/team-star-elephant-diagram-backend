@@ -16,10 +16,10 @@ export const ARGON2_OPTIONS = {
 export class UserService {
   constructor(private readonly users: UserRepository) { }
 
-  async register({ forename, surname, email, password }: RegisterInput): Promise<CreatedUser> {
+  async register({ forename, surname, email, password}: RegisterInput): Promise<CreatedUser> {
     const passwordHash = await argon2.hash(password, ARGON2_OPTIONS);
     const now = new Date();
-    return this.users.create({ forename, surname, email, passwordHash, createdAt: now, modifiedAt: now });
+    return this.users.create({ forename, surname, email, passwordHash, createdAt: now, modifiedAt: now, addressLine1: '', addressLine2: '', city: '', postcode: '' });
   }
 
   async login(data: LoginRequest): Promise<any> {

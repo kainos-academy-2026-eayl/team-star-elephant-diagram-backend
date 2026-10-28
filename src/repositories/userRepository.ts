@@ -15,11 +15,11 @@ export interface UserRepository {
 }
 
 export const prismaUserRepository: UserRepository = {
-  async create({ forename, surname, email, passwordHash, createdAt, modifiedAt }) {
+  async create({ forename, surname, email, passwordHash, createdAt, modifiedAt, addressLine1, addressLine2, city, postcode }) {
     try {
       return await prisma.user.create({
-        data: { forename, surname, email, passwordHash, createdAt, modifiedAt },
-        select: { id: true, forename: true, surname: true, email: true, createdAt: true, modifiedAt: true },
+        data: { forename, surname, email, passwordHash, createdAt, modifiedAt, addressLine1, addressLine2, city, postcode },
+        select: { userId: true, forename: true, surname: true, email: true, createdAt: true, modifiedAt: true, addressLine1: true, addressLine2: true, city: true, postcode: true },
       });
     } catch (error) {
       // P2002 = unique constraint violation; the DB constraint is the source of truth so concurrent requests can't create duplicates
@@ -32,6 +32,7 @@ export const prismaUserRepository: UserRepository = {
   async findByEmail(email: string) {
     return prisma.user.findUnique({
       where: { email },
+
     });
   },
 };

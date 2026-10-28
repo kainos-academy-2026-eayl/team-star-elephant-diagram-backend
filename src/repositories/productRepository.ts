@@ -7,7 +7,7 @@ export interface ProductRepository {
 
 export const productRepository: ProductRepository = {
   async findAll() {
-    const products = await prisma.product.findMany({ orderBy: { prod_id: 'asc' } });
+    const products = await prisma.product.findMany({ orderBy: { productId: 'asc' } });
     return products.map((product) => ({ ...product, price: product.price.toNumber() }));
   },
 };
