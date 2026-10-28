@@ -12,6 +12,7 @@ export const ARGON2_OPTIONS = {
 } as const;
 
 export class adminUserService {
+    static login: any;
     constructor(private readonly users: adminRepository) { }
 
 
