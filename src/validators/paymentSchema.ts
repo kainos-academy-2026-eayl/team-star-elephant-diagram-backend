@@ -25,15 +25,7 @@ export const registerSchema = z.object({
   expirydate: z
     .string()
     .trim()
-    .regex(/^(0[1-9]|1[0-2])\/\d{2}$/, 'Expiration date must be in MM/YY format')
-    .refine((value) => {
-      const [month, year] = value.split('/').map(Number);
-      const now = new Date();
-      return (
-        2000 + year > now.getFullYear() ||
-        (2000 + year === now.getFullYear() && month >= now.getMonth() + 1)
-      );
-    }, 'Card has expired'),
+    .regex(/^(0[1-9]|1[0-2])\/\d{2}$/, 'Expiration date must be in MM/YY format'),
 
 });
 
