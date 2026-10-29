@@ -3,6 +3,8 @@ import { once } from 'node:events'
 import { after, before, test } from 'node:test'
 import { createApp } from '../src/app.ts'
 
+process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
+
 let server
 let baseUrl
 
