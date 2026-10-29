@@ -1,9 +1,14 @@
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
+import { createBasketRouter } from './controllers/basketController';
+import { createExpandProductRouter } from './controllers/expandProductController';
 import { createProductRouter } from './controllers/productController';
+import { createInMemoryBasketRepository, type BasketRepository } from './repositories/basketRepository';
 import { productRepository, type ProductRepository } from './repositories/productRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
+import { BasketService } from './services/basketService';
+import { ExpandProductService } from './services/expandProductService';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
@@ -11,11 +16,13 @@ import { userController } from './controllers/userController';
 export interface AppDependencies {
 	productRepository?: ProductRepository;
 	userRepository?: UserRepository;
+	basketRepository?: BasketRepository;
 }
 
 export function createApp({
 	productRepository: productsRepository = productRepository,
 	userRepository = prismaUserRepository,
+	basketRepository = createInMemoryBasketRepository(),
 }: AppDependencies = {}): Express {
 	const app = express();
 
@@ -39,6 +46,8 @@ export function createApp({
 
 	app.use(userController(userService));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
+	app.use('/products', createExpandProductRouter(new ExpandProductService(productsRepository)));
+	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository)));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
