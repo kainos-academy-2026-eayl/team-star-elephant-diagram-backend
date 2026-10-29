@@ -6,6 +6,8 @@ import { createApp } from '../src/app.ts'
 import { DuplicateEmailError } from '../src/repositories/userRepository.ts'
 import { ARGON2_OPTIONS } from '../src/services/userService.ts'
 
+process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
+
 const users = new Map()
 const inMemoryUserRepository = {
   async findByEmail(email) {
@@ -73,7 +75,10 @@ test('POST /login still authenticates a registered user through the shared user 
   })
 
   assert.equal(response.status, 200)
-  assert.deepEqual(await response.json(), { status: 'Success' })
+  const body = await response.json()
+  assert.equal(body.status, 'Success')
+  assert.equal(typeof body.token, 'string')
+  assert.ok(body.token.length > 0)
 })
 
 test('POST /login still rejects invalid input through the shared user controller', async () => {
