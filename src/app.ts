@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import { createProductRouter } from './controllers/productController';
 import { productRepository, type ProductRepository } from './repositories/productRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
-import { prismaAdminUserRepository } from './repositories/adminRepository';
-import { adminUserService } from './services/AdminUserService';
+import { prismaAdminUserRepository, type adminRepository } from './repositories/adminRepository';
+import { AdminUserService } from './services/AdminUserService';
+import { createTokenService, type TokenService } from './services/tokenService';
 import { adminController } from './controllers/adminController';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
@@ -14,12 +15,15 @@ import { userController } from './controllers/userController';
 export interface AppDependencies {
 	productRepository?: ProductRepository;
 	userRepository?: UserRepository;
-	adminRepository?: typeof prismaAdminUserRepository;
+	adminRepository?: adminRepository;
+	tokenService?: TokenService;
 }
 
 export function createApp({
 	productRepository: productsRepository = productRepository,
 	userRepository = prismaUserRepository,
+	adminRepository = prismaAdminUserRepository,
+	tokenService = createTokenService(),
 }: AppDependencies = {}): Express {
 	const app = express();
 
@@ -43,7 +47,7 @@ export function createApp({
 
 	app.use(userController(userService));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
-	app.use(adminController(adminUserService));
+	app.use(adminController(new AdminUserService(adminRepository), tokenService));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
