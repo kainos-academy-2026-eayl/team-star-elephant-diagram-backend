@@ -1,9 +1,13 @@
 import argon2 from 'argon2';
-import type { CreatedUser } from '../models/user';
+import type { CreatedUser, User } from '../models/user';
 import type { UserRepository } from '../repositories/userRepository';
 import type { RegisterInput } from '../validators/registerSchema';
 import type { LoginRequest } from '../validators/loginSchema';
 import * as jose from 'jose';
+
+export class InvalidUserCredentialsError extends Error {
+  constructor() { super('Invalid email or password'); }
+}
 
 // OWASP Password Storage Cheat Sheet minimum for argon2id: 19 MiB memory, 2 iterations, 1 degree of parallelism
 export const ARGON2_OPTIONS = {
@@ -37,14 +41,23 @@ export class UserService {
     return this.users.create({ forename, surname, email, passwordHash, createdAt: now, modifiedAt: now, addressLine1: '', addressLine2: '', city: '', postcode: '' });
   }
 
-  async login(data: LoginRequest): Promise<string> {
+  async authenticate(data: LoginRequest): Promise<User> {
     const user = await this.users.findByEmail(data.email);
     if (!user) {
-      throw new Error('Invalid email or password');
+      throw new InvalidUserCredentialsError();
     }
     if (!await argon2.verify(user.passwordHash, data.password)) {
-      throw new Error('Invalid email or password');
+      throw new InvalidUserCredentialsError();
     }
+    return user;
+  }
+
+  async findById(userId: number): Promise<User | null> {
+    return this.users.findById(userId);
+  }
+
+  async login(data: LoginRequest): Promise<string> {
+    const user = await this.authenticate(data);
     const token = await new jose.SignJWT({ userId: user.userId, email: user.email })
       .setProtectedHeader({ alg: 'HS256' })
       .setExpirationTime('15m')
@@ -52,7 +65,7 @@ export class UserService {
     return token;
   }
 
-  async verifyToken(token: string): Promise<any> {
+  async verifyToken(token: string) {
     return jose.jwtVerify(token, this.jwtSecret);
   }
 }

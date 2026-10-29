@@ -64,6 +64,17 @@ model AdminUser {
   modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
 }
 
+model RefreshSession {
+  id            String   @id
+  principalId   Int
+  principalKind String
+  tokenHash     String
+  expiresAt     DateTime
+  revokedAt     DateTime?
+
+  @@index([expiresAt])
+}
+
 model Inventory {
   inventoryId     Int      @id @unique @default(autoincrement()) @map("inventory_id")
   quantity        Int      @default(0)

@@ -1,30 +1,41 @@
 import argon2 from 'argon2';
+import type { AdminUser } from '../models/AdminUser';
 import type { adminRepository } from '../repositories/adminRepository';
 import type { LoginRequest } from '../validators/loginSchema';
 
+export class InvalidCredentialsError extends Error {
+	constructor(message = 'Invalid email or password') {
+		super(message);
+		this.name = 'InvalidCredentialsError';
+	}
+}
 
 // OWASP Password Storage Cheat Sheet minimum for argon2id: 19 MiB memory, 2 iterations, 1 degree of parallelism
 export const ARGON2_OPTIONS = {
-    type: argon2.argon2id,
-    memoryCost: 19456,
-    timeCost: 2,
-    parallelism: 1,
+	type: argon2.argon2id,
+	memoryCost: 19456,
+	timeCost: 2,
+	parallelism: 1,
 } as const;
 
-export class adminUserService {
-    static login: any;
-    constructor(private readonly users: adminRepository) { }
+export class AdminUserService {
+	constructor(private readonly users: adminRepository) {}
 
+	async login(data: LoginRequest): Promise<AdminUser> {
+		const adminUser = await this.users.findByEmail(data.email);
 
-    async login(data: LoginRequest): Promise<void> {
-        const AdminUser = await this.users.findByEmail(data.email);
+		if (!adminUser) {
+			throw new InvalidCredentialsError();
+		}
 
-        if (!AdminUser) {
-            throw new Error('Invalid email or password');
-        }
+		if (!(await argon2.verify(adminUser.passwordHash, data.password))) {
+			throw new InvalidCredentialsError();
+		}
 
-        if (!await argon2.verify(AdminUser.passwordHash, data.password)) {
-            throw new Error('Invalid email or password');
-        }
-    }
+		return adminUser;
+	}
+
+	async findById(adminId: number): Promise<AdminUser | null> {
+		return this.users.findById(adminId);
+	}
 }

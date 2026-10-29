@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { after, before, test } from 'node:test'
 import { createApp } from '../src/app.ts'
+import './helpers/authEnvironment.mjs'
 
 process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
 

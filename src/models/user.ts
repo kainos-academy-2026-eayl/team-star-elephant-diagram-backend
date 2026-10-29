@@ -24,7 +24,7 @@ export interface CreatedUser {
   postcode: string;
 }
 
-export interface User {
+export interface User extends NewUser {
   userId: number;
   email: string;
   passwordHash: string;
