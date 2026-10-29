@@ -9,14 +9,14 @@ export function userController(userService: UserService): Router {
     const router = Router();
 
     router.post('/register', async (req: Request, res: Response) => {
-        const parsed = registerSchema.safeParse(req.body);
-        if (!parsed.success) {
-            res.status(400).json({ error: 'Invalid registration details', details: z.flattenError(parsed.error).fieldErrors });
+        const registerValidation = registerSchema.safeParse(req.body);
+        if (!registerValidation.success) {
+            res.status(400).json({ error: 'Invalid registration details', details: z.flattenError(registerValidation.error).fieldErrors });
             return;
         }
 
         try {
-            await userService.register(parsed.data);
+            await userService.register(registerValidation.data);
             res.status(201).json({ status: 'created' });
         } catch (error) {
             if (error instanceof DuplicateEmailError) {
@@ -29,16 +29,16 @@ export function userController(userService: UserService): Router {
     });
 
     router.post('/login', async (req: Request, res: Response) => {
-        const parsed = loginSchema.safeParse(req.body);
-        if (!parsed.success) {
+        const loginValidation = loginSchema.safeParse(req.body);
+        if (!loginValidation.success) {
             res.status(400).json({
                 error: 'Invalid login details',
-                details: z.flattenError(parsed.error).fieldErrors,
+                details: z.flattenError(loginValidation.error).fieldErrors,
             });
             return;
         }
         try {
-            const token = await userService.login(parsed.data);
+            const token = await userService.login(loginValidation.data);
             res.status(200).json({
                 status: 'Success',
                 token,

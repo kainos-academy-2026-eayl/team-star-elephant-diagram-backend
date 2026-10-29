@@ -6,18 +6,18 @@ import { loginSchema } from '../validators/loginSchema';
 export function adminController(adminService: typeof adminUserService) {
     const router = Router();
     router.post('/login', async (req: Request, res: Response) => {
-        const parsed = loginSchema.safeParse(req.body);
+        const loginValidation = loginSchema.safeParse(req.body);
 
-        if (!parsed.success) {
+        if (!loginValidation.success) {
             res.status(400).json({
                 error: 'Invalid login details',
-                details: z.flattenError(parsed.error).fieldErrors,
+                details: z.flattenError(loginValidation.error).fieldErrors,
             });
             return;
         }
 
         try {
-            await adminService.login(parsed.data);
+            await adminService.login(loginValidation.data);
 
             res.status(200).json({
                 status: 'Success',
