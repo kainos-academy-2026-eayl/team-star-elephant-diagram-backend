@@ -4,6 +4,7 @@ import prisma from '../prismaClient';
 export interface ProductRepository {
   findAll(): Promise<readonly Product[]>;
   findById(productId: number): Promise<ExpandedProductData | null>;
+  findByIds(productIds: readonly number[]): Promise<readonly Pick<Product, 'productId' | 'name' | 'price' | 'imageURL'>[]>;
 }
 
 export const productRepository: ProductRepository = {
@@ -34,5 +35,17 @@ export const productRepository: ProductRepository = {
       imageURL: product.imageURL,
       inventory: { quantity },
     };
+  },
+
+  async findByIds(productIds) {
+    if (productIds.length === 0) {
+      return [];
+    }
+
+    const products = await prisma.product.findMany({
+      where: { productId: { in: [...productIds] } },
+      select: { productId: true, name: true, price: true, imageURL: true },
+    });
+    return products.map((product) => ({ ...product, price: product.price.toNumber() }));
   },
 };

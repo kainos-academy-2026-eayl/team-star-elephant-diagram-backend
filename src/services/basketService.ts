@@ -18,22 +18,23 @@ export class BasketService {
             throw new ProductNotFoundError(productId);
         }
 
-        const existing = (await this.baskets.getItems(basketId)).get(productId) ?? 0;
-        const newQuantity = existing + quantity;
-        if (newQuantity > MAX_ITEM_QUANTITY) {
+        const quantityAdded = await this.baskets.addQuantity(basketId, productId, quantity, MAX_ITEM_QUANTITY);
+        if (!quantityAdded) {
             throw new BasketQuantityError(`Quantity cannot exceed ${MAX_ITEM_QUANTITY}`);
         }
 
-        await this.baskets.setQuantity(basketId, productId, newQuantity);
         return this.getBasket(basketId);
     }
 
     async getBasket(basketId: string): Promise<Basket> {
         const items: BasketItem[] = [];
+        const quantities = await this.baskets.getItems(basketId);
+        // Prices are re-read from the database so the basket always reflects current values.
+        const products = await this.products.findByIds([...quantities.keys()]);
+        const productsById = new Map(products.map((product) => [product.productId, product]));
 
-        for (const [productId, quantity] of await this.baskets.getItems(basketId)) {
-            // Prices are re-read from the database so the basket always reflects current values.
-            const product = await this.products.findById(productId);
+        for (const [productId, quantity] of quantities) {
+            const product = productsById.get(productId);
             if (!product) continue;
             items.push({
                 productId: product.productId,

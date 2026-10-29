@@ -27,6 +27,7 @@ before(async () => {
                 if (repositoryError) throw repositoryError;
                 return catalogue.find((product) => product.productId === id) ?? null;
             },
+            async findByIds(ids) { return catalogue.filter((product) => ids.includes(product.productId)); },
         }
     });
     server = app.listen(0, '127.0.0.1');
@@ -77,8 +78,30 @@ test('findById returns null for an unknown product', async (t) => {
     assert.equal(await productRepository.findById(999), null);
 });
 
+test('findByIds selects only basket display fields in one query', async (t) => {
+    const originalFindMany = prisma.product.findMany;
+    const findMany = t.mock.fn(async () => [
+        { productId: 1, name: 'CoreBook 14 Essential', price: new Prisma.Decimal('349.99'), imageURL: 'https://example.com/1.jpg' },
+        { productId: 3, name: 'AirLite 13 Ultrabook', price: new Prisma.Decimal('849.99'), imageURL: 'https://example.com/3.jpg' },
+    ]);
+    prisma.product.findMany = findMany;
+    t.after(() => { prisma.product.findMany = originalFindMany; });
+
+    assert.deepEqual(await productRepository.findByIds([1, 3]), [
+        { productId: 1, name: 'CoreBook 14 Essential', price: 349.99, imageURL: 'https://example.com/1.jpg' },
+        { productId: 3, name: 'AirLite 13 Ultrabook', price: 849.99, imageURL: 'https://example.com/3.jpg' },
+    ]);
+    assert.deepEqual(findMany.mock.calls[0].arguments, [{
+        where: { productId: { in: [1, 3] } },
+        select: { productId: true, name: true, price: true, imageURL: true },
+    }]);
+});
+
 test('ExpandProductService does not alter the price', async () => {
-    const service = new ExpandProductService({ async findById() { return catalogue[0]; } });
+    const service = new ExpandProductService({
+        async findById() { return catalogue[0]; },
+        async findByIds() { return []; },
+    });
     assert.equal((await service.getProductExpanded(1)).price, 349.99);
 });
 
@@ -97,7 +120,7 @@ test('GET /products/:id returns 404 for an unknown product', async () => {
 });
 
 test('GET /products/:id returns 400 for an invalid ID', async () => {
-    for (const id of ['abc', '0', '-1', '1.5']) {
+    for (const id of ['abc', '0', '-1', '1.5', '2147483648']) {
         const response = await fetch(`${baseUrl}/products/${id}`);
         assert.equal(response.status, 400, id);
     }
@@ -158,6 +181,11 @@ test('POST /basket rejects invalid quantities', async () => {
         const response = await addToBasket({ productId: 1, quantity });
         assert.equal(response.status, 400, String(quantity));
     }
+});
+
+test('POST /basket rejects product IDs outside the PostgreSQL Int range', async () => {
+    const response = await addToBasket({ productId: 2147483648, quantity: 1 });
+    assert.equal(response.status, 400);
 });
 
 test('POST /basket rejects quantities that exceed the per-item limit when combined', async () => {

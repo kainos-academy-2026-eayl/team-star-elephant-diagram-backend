@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const MAX_ITEM_QUANTITY = 99;
 
 export const addToBasketSchema = z.object({
-    productId: z.coerce.number().int().positive('Product ID must be a positive number'),
+    productId: z.coerce.number().int().positive('Product ID must be a positive number').max(2_147_483_647),
     quantity: z.coerce
         .number()
         .int('Quantity must be a whole number')
