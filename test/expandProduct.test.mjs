@@ -7,6 +7,8 @@ import prisma from '../src/prismaClient.ts';
 import { productRepository } from '../src/repositories/productRepository.ts';
 import { ExpandProductService } from '../src/services/expandProductService.ts';
 
+process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security';
+
 const catalogue = [
     { productId: 1, name: 'CoreBook 14 Essential', category: 'Laptops', description: 'Laptop', price: 349.99, imageURL: 'https://example.com/1.jpg', inventory: { quantity: 5 } },
     { productId: 2, name: 'CoreBook 15 Everyday', category: 'Laptops', description: 'Laptop', price: 549.99, imageURL: 'https://example.com/2.jpg', inventory: { quantity: 0 } },

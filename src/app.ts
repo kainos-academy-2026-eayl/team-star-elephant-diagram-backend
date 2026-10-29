@@ -11,12 +11,15 @@ import { prismaAdminUserRepository, type adminRepository } from './repositories/
 import { AdminUserService } from './services/AdminUserService';
 import { createTokenService, type TokenService } from './services/tokenService';
 import { adminController } from './controllers/adminController';
+import { BasketService } from './services/basketService';
+import { ExpandProductService } from './services/expandProductService';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
+	basketRepository?: BasketRepository;
 	userRepository?: UserRepository;
 	adminRepository?: adminRepository;
 	tokenService?: TokenService;
@@ -24,6 +27,7 @@ export interface AppDependencies {
 
 export function createApp({
 	productRepository: productsRepository = productRepository,
+	basketRepository = createInMemoryBasketRepository(),
 	userRepository = prismaUserRepository,
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
@@ -48,6 +52,7 @@ export function createApp({
 	});
 	const userService = new UserService(userRepository);
 
+	app.use(adminController(new AdminUserService(adminRepository), tokenService));
 	app.use(userController(userService));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
 	app.use('/products', createExpandProductRouter(new ExpandProductService(productsRepository)));
