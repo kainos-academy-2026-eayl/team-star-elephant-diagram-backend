@@ -229,8 +229,9 @@ async function main() {
         console.log('Products already exist, skipping seed');
     }
 
-    if ((await prisma.adminUser.count()) === 0) {
-        const seedPassword = process.env.ADMIN_SEED_PASSWORD;
+    const seedPassword = process.env.ADMIN_SEED_PASSWORD;
+    const adminCount = await prisma.adminUser.count();
+    if (adminCount === 0) {
         if (!seedPassword) {
             console.warn('ADMIN_SEED_PASSWORD not set: seeded admin users keep placeholder hashes and cannot log in');
         }
@@ -241,6 +242,13 @@ async function main() {
         });
 
         console.log(`${result.count} admin users seeded`);
+    } else if (seedPassword) {
+        const seedHash = await argon2.hash(seedPassword, ARGON2_OPTIONS);
+        const result = await prisma.adminUser.updateMany({
+            where: { passwordHash: { in: adminUsers.map(({ passwordHash }) => passwordHash) } },
+            data: { passwordHash: seedHash },
+        });
+        console.log(`${result.count} seeded admin passwords updated`);
     } else {
         console.log('Admin users already exist, skipping seed');
     }

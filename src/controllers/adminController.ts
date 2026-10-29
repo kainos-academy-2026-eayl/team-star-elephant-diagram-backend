@@ -56,15 +56,25 @@ export function adminController(adminService: AdminUserService, tokens: TokenSer
         }
     });
 
-    // Each dashboard is limited to its own role; SuperAdmin may open any.
     router.get(
         '/admin/dashboards/:key',
-        requireAdmin(
-            tokens,
-            (payload, req) => payload.role === 'SuperAdmin' || DASHBOARD_BY_ROLE[payload.role] === req.params.key,
-        ),
-        (req: Request, res: Response) => {
-            res.json({ dashboard: req.params.key, role: res.locals.admin?.role });
+        requireAdmin(tokens),
+        async (req: Request, res: Response) => {
+            try {
+                const admin = await adminService.findById(res.locals.admin?.adminId ?? -1);
+                if (!admin) {
+                    res.status(401).json({ error: 'Authentication required' });
+                    return;
+                }
+                if (admin.role !== 'SuperAdmin' && DASHBOARD_BY_ROLE[admin.role] !== req.params.key) {
+                    res.status(403).json({ error: 'Forbidden' });
+                    return;
+                }
+                res.json({ dashboard: req.params.key, role: admin.role });
+            } catch (error) {
+                console.error('Admin lookup failed', error);
+                res.status(500).json({ error: 'Internal server error' });
+            }
         },
     );
 

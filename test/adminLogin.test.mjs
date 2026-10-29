@@ -5,6 +5,8 @@ import argon2 from 'argon2'
 import { createApp } from '../src/app.ts'
 import { ARGON2_OPTIONS } from '../src/services/userService.ts'
 
+process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
+
 const admins = new Map()
 let failLookup = false
 const inMemoryAdminRepository = {
@@ -96,6 +98,21 @@ test('GET /admin/dashboards/:key only allows the matching role, or SuperAdmin', 
 
   const superAdmin = await tokenFor('superadmin@example.com')
   assert.equal((await get('/admin/dashboards/finance', superAdmin)).status, 200)
+})
+
+test('GET /admin/dashboards/:key uses the current admin account and role', async () => {
+  const inventoryAdmin = admins.get('inventorymanager@example.com')
+  const inventoryToken = await tokenFor('inventorymanager@example.com')
+  inventoryAdmin.role = 'Admin'
+  try {
+    assert.equal((await get('/admin/dashboards/inventory', inventoryToken)).status, 403)
+
+    admins.delete(inventoryAdmin.email)
+    assert.equal((await get('/admin/dashboards/inventory', inventoryToken)).status, 401)
+  } finally {
+    inventoryAdmin.role = 'InventoryManager'
+    admins.set(inventoryAdmin.email, inventoryAdmin)
+  }
 })
 
 test('POST /admin/login rejects wrong password, unknown email and placeholder hash', async () => {
