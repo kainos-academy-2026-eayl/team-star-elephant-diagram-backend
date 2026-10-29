@@ -30,6 +30,7 @@ test("admin user seed respects Prisma field limits and includes valid credential
 		assert.ok(user.surname.length > 0 && user.surname.length <= 100);
 		assert.match(user.email, /^[^\s@]+@[^\s@]+\.[^\s@]+$/);
 		assert.ok(user.role.length > 0 && user.role.length <= 50);
-		assert.ok(user.passwordHash.length > 0);
+		assert.match(user.passwordHash, /^\$argon2id\$/);
 	}
+	assert.equal(new Set(adminUsers.map((user) => user.passwordHash)).size, adminUsers.length);
 });

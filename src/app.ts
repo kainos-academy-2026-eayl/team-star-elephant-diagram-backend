@@ -7,8 +7,10 @@ import { createProductRouter } from './controllers/productController';
 import { createInMemoryBasketRepository, type BasketRepository } from './repositories/basketRepository';
 import { productRepository, type ProductRepository } from './repositories/productRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
-import { BasketService } from './services/basketService';
-import { ExpandProductService } from './services/expandProductService';
+import { prismaAdminUserRepository, type adminRepository } from './repositories/adminRepository';
+import { AdminUserService } from './services/AdminUserService';
+import { createTokenService, type TokenService } from './services/tokenService';
+import { adminController } from './controllers/adminController';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
@@ -16,13 +18,15 @@ import { userController } from './controllers/userController';
 export interface AppDependencies {
 	productRepository?: ProductRepository;
 	userRepository?: UserRepository;
-	basketRepository?: BasketRepository;
+	adminRepository?: adminRepository;
+	tokenService?: TokenService;
 }
 
 export function createApp({
 	productRepository: productsRepository = productRepository,
 	userRepository = prismaUserRepository,
-	basketRepository = createInMemoryBasketRepository(),
+	adminRepository = prismaAdminUserRepository,
+	tokenService = createTokenService(),
 }: AppDependencies = {}): Express {
 	const app = express();
 

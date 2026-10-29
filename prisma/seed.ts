@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
+import argon2 from 'argon2';
+import { ARGON2_OPTIONS } from '../src/services/userService';
 import { products } from './products';
 import { adminUsers } from './adminUsers';
 
@@ -227,13 +229,26 @@ async function main() {
         console.log('Products already exist, skipping seed');
     }
 
-    if ((await prisma.adminUser.count()) === 0) {
+    const seedPassword = process.env.ADMIN_SEED_PASSWORD;
+    const adminCount = await prisma.adminUser.count();
+    if (adminCount === 0) {
+        if (!seedPassword) {
+            console.warn('ADMIN_SEED_PASSWORD not set: seeded admin users keep placeholder hashes and cannot log in');
+        }
+        const seedHash = seedPassword ? await argon2.hash(seedPassword, ARGON2_OPTIONS) : undefined;
         const result = await prisma.adminUser.createMany({
-            data: adminUsers,
+            data: adminUsers.map((user) => ({ ...user, passwordHash: seedHash ?? user.passwordHash })),
             skipDuplicates: true,
         });
 
         console.log(`${result.count} admin users seeded`);
+    } else if (seedPassword) {
+        const seedHash = await argon2.hash(seedPassword, ARGON2_OPTIONS);
+        const result = await prisma.adminUser.updateMany({
+            where: { passwordHash: { in: adminUsers.map(({ passwordHash }) => passwordHash) } },
+            data: { passwordHash: seedHash },
+        });
+        console.log(`${result.count} seeded admin passwords updated`);
     } else {
         console.log('Admin users already exist, skipping seed');
     }
