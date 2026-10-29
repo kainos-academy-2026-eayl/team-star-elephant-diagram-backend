@@ -22,3 +22,5 @@ export interface ExpandedProductData {
   imageURL: string;
   inventory: ProductInventory;
 }
+
+
