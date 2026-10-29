@@ -3,6 +3,7 @@ import type { CreatedUser } from '../models/user';
 import type { UserRepository } from '../repositories/userRepository';
 import type { RegisterInput } from '../validators/registerSchema';
 import type { LoginRequest } from '../validators/loginSchema';
+import * as jose from 'jose';
 
 // OWASP Password Storage Cheat Sheet minimum for argon2id: 19 MiB memory, 2 iterations, 1 degree of parallelism
 export const ARGON2_OPTIONS = {
@@ -12,24 +13,46 @@ export const ARGON2_OPTIONS = {
   parallelism: 1,
 } as const;
 
-export class UserService {
-  constructor(private readonly users: UserRepository) { }
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET environment variable is not set');
+  }
+  if (secret.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters for security (minimum high-entropy requirement)');
+  }
+  return new TextEncoder().encode(secret);
+}
 
-  async register({ forename, surname, email, password}: RegisterInput): Promise<CreatedUser> {
+export class UserService {
+  private readonly jwtSecret: Uint8Array;
+
+  constructor(private readonly users: UserRepository) {
+    this.jwtSecret = getJwtSecret();
+  }
+
+  async register({ forename, surname, email, password }: RegisterInput): Promise<CreatedUser> {
     const passwordHash = await argon2.hash(password, ARGON2_OPTIONS);
     const now = new Date();
     return this.users.create({ forename, surname, email, passwordHash, createdAt: now, modifiedAt: now, addressLine1: '', addressLine2: '', city: '', postcode: '' });
   }
 
-  async login(data: LoginRequest): Promise<void> {
+  async login(data: LoginRequest): Promise<string> {
     const user = await this.users.findByEmail(data.email);
-
     if (!user) {
       throw new Error('Invalid email or password');
     }
-
     if (!await argon2.verify(user.passwordHash, data.password)) {
       throw new Error('Invalid email or password');
     }
+    const token = await new jose.SignJWT({ userId: user.userId, email: user.email })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setExpirationTime('15m')
+      .sign(this.jwtSecret);
+    return token;
+  }
+
+  async verifyToken(token: string): Promise<any> {
+    return jose.jwtVerify(token, this.jwtSecret);
   }
 }

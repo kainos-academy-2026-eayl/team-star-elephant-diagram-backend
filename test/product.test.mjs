@@ -6,6 +6,8 @@ import { createApp } from '../src/app.ts';
 import prisma from '../src/prismaClient.ts';
 import { productRepository } from '../src/repositories/productRepository.ts';
 
+process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
+
 let server;
 let baseUrl;
 let products;
