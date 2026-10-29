@@ -101,15 +101,25 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
    Secrets must contain at least 32 bytes; access and refresh secrets must
    differ. Keep them stable across restarts and instances. Missing secrets
    fail startup in every environment. Set `NODE_ENV=production` in production.
-2. Run `npm run db:generate` and apply the checked-in migrations to the intended
-   database with `npm run db:deploy`. Review migration/baseline compatibility
-   for existing databases first; do not reset a database to resolve drift.
+2. Run `npm run db:generate`. For a new database, apply the checked-in migrations
+   with `npm run db:deploy`. For an existing database whose schema matches the
+   pre-auth baseline, first back it up and record that baseline without running
+   its SQL:
+
+   ```sh
+   npx prisma migrate resolve --applied 20261029130000_baseline
+   npm run db:deploy
+   ```
+
+   `migrate resolve` only records the baseline as applied; it does not modify
+   existing data. Verify the baseline schema matches before marking it applied,
+   and do not reset a database to resolve drift.
    The `20261029135000_align_auth_schema` migration renames legacy `User.id`
    to `userId` and `AdminUser.adminID` to `adminId`, adds the four user address
    fields, and fills missing addresses with empty strings. It preserves
    existing accounts, IDs, password hashes, addresses and reset-token columns.
-   The following migration creates `RefreshSession`. These targeted migrations
-   do not create missing commerce tables.
+   The baseline creates the initial commerce schema; the following migration
+   creates `RefreshSession`.
 3. Serve the frontend over **HTTPS**, including local browser testing.
    In the sibling frontend, run `npm run dev:cert` and configure:
 
