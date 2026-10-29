@@ -27,6 +27,16 @@ BEGIN
         END IF;
         ALTER TABLE "AdminUser" RENAME COLUMN "adminID" TO "adminId";
     END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public' AND indexname = 'User_id_key'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public' AND indexname = 'User_userId_key'
+    ) THEN
+        ALTER INDEX "User_id_key" RENAME TO "User_userId_key";
+    END IF;
 END $$;
 
 ALTER TABLE "User"
