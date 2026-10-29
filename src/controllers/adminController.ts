@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { DASHBOARD_BY_ROLE } from '../models/adminRoles';
 import { requireAdmin } from '../middleware/requireAdmin';
@@ -11,6 +12,13 @@ import type { TokenService } from '../services/tokenService';
 import type { AuthSessionService } from '../services/authSessionService';
 import { loginSchema } from '../validators/loginSchema';
 import { sendTokens } from './authController';
+
+const adminRateLimit = rateLimit({
+	windowMs: 15 * 60 * 1000,
+	limit: 100,
+	standardHeaders: true,
+	legacyHeaders: false,
+});
 
 export function adminController(
 	adminService: AdminUserService,
@@ -60,6 +68,7 @@ export function adminController(
 
 	router.get(
 		['/admin/me', '/admin'],
+		adminRateLimit,
 		requireAdmin(tokens),
 		async (req: Request, res: Response) => {
 			try {
@@ -88,6 +97,7 @@ export function adminController(
 
 	router.get(
 		'/admin/dashboards/:key',
+		adminRateLimit,
 		requireAdmin(tokens),
 		async (req: Request, res: Response) => {
 			try {

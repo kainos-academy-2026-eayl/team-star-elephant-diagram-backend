@@ -37,6 +37,7 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
     "jose": "^6.2.13",
     "nunjucks": "^3.2.4",
     "zod": "^4.6.7"
