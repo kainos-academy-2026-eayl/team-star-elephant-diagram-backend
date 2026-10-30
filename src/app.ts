@@ -19,6 +19,9 @@ import { userController } from './controllers/userController';
 import { authController } from './controllers/authController';
 import { AuthSessionService } from './services/authSessionService';
 import { prismaRefreshSessionRepository, type RefreshSessionRepository } from './repositories/refreshSessionRepository';
+import { prismaPasswordResetRepository, type PasswordResetRepository } from './repositories/passwordResetRepository';
+import { createConsoleResetDelivery, PasswordResetService, type PasswordResetDelivery } from './services/passwordResetService';
+import { passwordResetController } from './controllers/passwordResetController';
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
@@ -29,6 +32,8 @@ export interface AppDependencies {
 	refreshSessionRepository?: RefreshSessionRepository;
 	authRateLimitOptions?: Partial<RateLimitOptions>;
 	trustedProxyAddresses?: string[];
+	passwordResetRepository?: PasswordResetRepository;
+	passwordResetDelivery?: PasswordResetDelivery;
 }
 
 export function createApp({
@@ -40,6 +45,8 @@ export function createApp({
 	refreshSessionRepository = prismaRefreshSessionRepository,
 	authRateLimitOptions = {},
 	trustedProxyAddresses = process.env.TRUSTED_PROXY_IPS?.split(',').map((address) => address.trim()).filter(Boolean) ?? [],
+	passwordResetRepository = prismaPasswordResetRepository,
+	passwordResetDelivery = createConsoleResetDelivery(),
 }: AppDependencies = {}): Express {
 	const app = express();
 	app.set('trust proxy', trustedProxyAddresses);
@@ -70,6 +77,7 @@ export function createApp({
 	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository)));
 	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
+	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {

@@ -151,6 +151,8 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | `POST /admin/login` | Admin JSON credentials; returns `accessToken`, `expiresIn: 900`, and public admin details. |
 | `POST /auth/refresh` | Exchanges the refresh cookie for a new access token and rotates the cookie. |
 | `POST /auth/logout` | Revokes the refresh session and expires the refresh cookie. |
+| `POST /forgot-password` | Accepts JSON `email`; requests a local reset link without revealing account existence. |
+| `POST /reset-password` | Accepts JSON `token`, `password`; changes the customer password and revokes their refresh sessions. |
 | `GET /profile` | Requires a customer access token in `Authorization: Bearer <token>`. |
 | `GET /admin/me` | Requires an admin access token in the header. |
 | `GET /admin` | Returns authenticated staff identity; dashboard metrics are not implemented. |
@@ -164,6 +166,51 @@ headers. On the frontend, use `/login` for customers or `/admin/login` for staff
 and visit `/profile` or `/admin` to exercise protected page loading.
 `POST /logout` on the frontend revokes the refresh session and clears both
 browser credentials.
+
+### Local password reset
+
+Apply the additive `20261030110000_password_reset` migration with
+`npm run db:deploy`, then regenerate the client with `npm run db:generate`.
+In the backend's untracked `.env`, set:
+
+```ini
+PASSWORD_RESET_DELIVERY=console
+FRONTEND_BASE_URL=https://localhost:3000
+```
+
+Restart the backend, open the frontend's `/forgot-password` page, and enter a
+registered customer email. Copy the reset link from the **backend terminal**,
+open it in the browser, and submit matching passwords of 8 to 128 characters.
+Log in with the new password; the old password no longer works.
+
+No email is sent. Links contain random 256-bit tokens; only SHA-256 token hashes
+are stored on `User`. Tokens expire after 15 minutes, are single-use, and a new
+request replaces the previous link. Password updates, token consumption, and
+revocation of all customer refresh sessions commit in one transaction. Existing
+access JWTs can still work until their 15-minute expiry. Admin passwords and
+sessions are not affected.
+
+Console delivery is explicitly local-development-only and fails startup in
+production. Do not share terminal output containing links. Without delivery
+configured, reset requests return 503 rather than claiming success. The base
+URL must be an HTTPS origin or a localhost/loopback HTTP origin. It is never
+derived from the incoming Host header.
+
+Both backend reset POST endpoints share a limit of 10 attempts per source IP
+per 15 minutes. This uses process-local storage and sees the frontend server's
+IP for proxied calls; a multi-instance deployment needs a shared limiter and
+an intentional trusted-proxy/client-IP strategy before enabling email delivery.
+
+`npm test` covers API behavior using in-memory repositories. To additionally
+run the PostgreSQL persistence/concurrency test, migrate an isolated local
+database named `password_reset_test_*`, set `PASSWORD_RESET_TEST_DATABASE_URL`
+to its connection URL, then run:
+
+```sh
+node --import tsx --test test/passwordResetDatabase.test.mjs
+```
+
+The database test refuses non-local or non-test database names.
 
 ### Persistence and security
 

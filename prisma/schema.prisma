@@ -27,6 +27,8 @@ model User {
   surname        String          @db.VarChar(100)
   email          String          @unique
   passwordHash   String          @map("password_hash")
+  passwordResetTokenHash String?  @unique
+  passwordResetExpiresAt DateTime?
   createdAt      DateTime        @default(now()) @map("created_at")
   modifiedAt     DateTime        @default(now()) @updatedAt @map("modified_at")
   addressLine1   String          @db.VarChar(255)
