@@ -5,6 +5,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { createApp } from '../src/app.ts';
 import prisma from '../src/prismaClient.ts';
 import { productRepository } from '../src/repositories/productRepository.ts';
+import './helpers/authEnvironment.mjs';
 import { ProductService } from '../src/services/productService.ts';
 
 const catalogue = [

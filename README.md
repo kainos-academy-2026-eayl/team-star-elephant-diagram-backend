@@ -33,6 +33,7 @@ node -v   # should print v22.x.x
 nvm use
 npm ci             # install exact dependency versions from package-lock.json
 cp .env.example .env
+# Configure DATABASE_URL and all three signing secrets (see Authentication below).
 npm run dev        # start the service with hot reload
 ```
 
@@ -58,8 +59,10 @@ The frontend server forwards registration and login as JSON to `POST /register`
 and `POST /login`, and loads products from `GET /products`.
 The catalogue reads the Prisma `Product` table; an empty table returns `[]`.
 Prices are stored as decimal pounds and returned as JSON numbers, displayed as GBP.
-Login validates credentials only: it does not create a session or protect the
-catalogue. Basket operations are not implemented by this API.
+Login creates a 15-minute access JWT and a seven-day rotating refresh session.
+See [Authentication](#authentication) for secrets, the new database
+migration, HTTPS requirements, `/auth/refresh` and logout behavior.
+The catalogue remains public. Basket operations are not implemented by this API.
 
 ### Seed the product catalogue
 
@@ -81,6 +84,119 @@ are left unchanged, so an existing catalogue (including the old sample products)
 will not be replaced or topped up. The existing user seed is preserved.
 
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
+
+## Authentication
+
+Customer and admin authentication use standard HS256 JWTs through `jose`:
+15-minute access tokens and rotating refresh sessions with an **absolute
+seven-day lifetime from login**. Refreshing does not extend that lifetime.
+
+### Setup
+
+1. Generate three independent random secrets with `openssl rand -hex 32`, one
+   for each variable in your untracked `.env`:
+   - `JWT_SECRET`: customer access tokens.
+   - `ADMIN_ACCESS_TOKEN_SECRET`: admin access tokens.
+   - `ADMIN_REFRESH_TOKEN_SECRET`: refresh tokens.
+   Secrets must contain at least 32 bytes; access and refresh secrets must
+   differ. Keep them stable across restarts and instances. Missing secrets
+   fail startup in every environment. Set `NODE_ENV=production` in production.
+2. Run `npm run db:generate`. For a new database, apply the checked-in migrations
+   with `npm run db:deploy`. For an existing database whose schema matches the
+   pre-auth baseline, first back it up and record that baseline without running
+   its SQL:
+
+   ```sh
+   npx prisma migrate resolve --applied 20261029130000_baseline
+   npm run db:deploy
+   ```
+
+   `migrate resolve` only records the baseline as applied; it does not modify
+   existing data. Verify the baseline schema matches before marking it applied,
+   and do not reset a database to resolve drift.
+   The `20261029135000_align_auth_schema` migration renames legacy `User.id`
+   to `userId` and `AdminUser.adminID` to `adminId`, adds the four user address
+   fields, and fills missing addresses with empty strings. It preserves
+   existing accounts, IDs, password hashes, addresses and reset-token columns.
+   The baseline creates the initial commerce schema; the following migration
+   creates `RefreshSession`.
+3. Serve the frontend over **HTTPS**, including local browser testing.
+   In the sibling frontend, run `npm run dev:cert` and configure:
+
+   ```ini
+   TLS_CERT_FILE=.certs/localhost.pem
+   TLS_KEY_FILE=.certs/localhost-key.pem
+   ```
+
+   Restart the frontend and open **https://localhost:3000/login**.
+   The generated certificate is self-signed; accept its warning only for your
+   localhost development server, or use a trusted local development certificate.
+   Set `FRONTEND_BASE_URL=https://localhost:3000` in the backend `.env`.
+   A TLS proxy is also supported; preserve the public Host header. See the
+   frontend README for details. Keep backend HTTP traffic on a trusted private
+   connection rather than exposing it across an untrusted network.
+
+### API
+
+| Backend endpoint | Behavior |
+| --- | --- |
+| `POST /login` | Customer JSON credentials; returns `accessToken`, `expiresIn: 900`, and legacy `token` alias. |
+| `POST /admin/login` | Admin JSON credentials; returns `accessToken`, `expiresIn: 900`, and public admin details. |
+| `POST /auth/refresh` | Exchanges the refresh cookie for a new access token and rotates the cookie. |
+| `POST /auth/logout` | Revokes the refresh session and expires the refresh cookie. |
+| `GET /profile` | Requires a customer access token in `Authorization: Bearer <token>`. |
+| `GET /admin/me` | Requires an admin access token in the header. |
+| `GET /admin` | Returns authenticated staff identity; dashboard metrics are not implemented. |
+
+`POST /admin/logout` remains a compatibility alias. The refresh endpoint is
+`/auth/refresh`, not `/admin/refresh`. Customer order history is not implemented;
+the profile response explicitly flags that limitation.
+
+API clients retain the refresh cookie and send access tokens as Authorization
+headers. On the frontend, use `/login` for customers or `/admin/login` for staff,
+and visit `/profile` or `/admin` to exercise protected page loading.
+`POST /logout` on the frontend revokes the refresh session and clears both
+browser credentials.
+
+### Persistence and security
+
+- The refresh cookie is always `HttpOnly; Secure; SameSite=Strict; Path=/`,
+  with a seven-day expiry. Plain HTTP is not supported for authenticated
+  browser sessions; Secure is never disabled for development.
+- The Express/Nunjucks frontend is server-rendered, not a browser SPA. It keeps
+  the access token in an additional Secure, HttpOnly, Strict cookie and forwards
+  it to the API **as an Authorization header**. It preserves the refresh
+  cookie's expiry and attributes.
+- On a protected page request, an expired or missing access token triggers one
+  refresh-and-retry. Reloads and browser restarts can restore login while the
+  seven-day session is valid. Customer and admin login share cookie names, so
+  logging into one replaces the other in that browser.
+- Verification checks HS256, issuer, audience, required claims, expiration,
+  account kind and token purpose. Access tokens cannot act as refresh tokens,
+  or vice versa. Deleted accounts cannot refresh.
+- PostgreSQL stores only a SHA-256 hash of the current refresh token, plus
+  session/account identifiers, expiration and revocation timestamps.
+  Rotation uses an atomic conditional update. Consumed tokens cannot rotate
+  again; detected reuse revokes the session.
+- The frontend coalesces in-flight refreshes per process. Concurrent requests
+  across instances or tabs may still force re-login if they present an
+  already-consumed token.
+- Logout revokes refresh credentials. Already-issued access tokens can remain
+  valid for their remaining **15 minutes**; logout is not immediate access
+  revocation.
+- Refresh and protected profile responses use `Cache-Control: no-store`.
+  HttpOnly prevents JavaScript reading cookies, but does not stop XSS making
+  authenticated requests. SameSite mitigates CSRF, not XSS. The frontend also
+  rejects cross-origin login/logout POSTs without trusting client-supplied
+  forwarding headers.
+
+Deployments replacing the old custom two-part tokens require users to log in
+again. Prune expired/revoked database sessions as an operational maintenance task.
+
+Run `npm test` and `npm run build` in both repositories. Authentication tests
+cover JWT compatibility, lifetimes, account/purpose separation, cookie flags,
+session restoration, rotation/replay, logout and failed refreshes. Backend unit
+tests inject a session repository rather than mutate a developer database.
 
 ## Making it your own
 
@@ -134,8 +250,8 @@ To test an existing account instead, open **Login successfully**, set `loginEmai
 and `loginPassword` in your local Bruno environment, and send that request without
 running registration. If you already ran registration in this session, clear its
 runtime `loginEmail` variable first because runtime variables override environment
-variables. Do not commit real credentials. The login endpoint currently returns
-only `{"status":"success"}`; it does not issue a token or session.
+variables. Do not commit real credentials. Login returns an access token and
+sets the Secure, HttpOnly refresh cookie; see [Authentication](#authentication).
 
 ## CI and required merge checks
 

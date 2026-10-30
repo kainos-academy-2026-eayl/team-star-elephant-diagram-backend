@@ -4,6 +4,8 @@ import { after, before, beforeEach, test } from 'node:test'
 import * as jose from 'jose'
 import { createApp } from '../src/app.ts'
 import { UserService } from '../src/services/userService.ts'
+import { memoryRefreshSessions } from './helpers/refreshSessions.mjs'
+import './helpers/authEnvironment.mjs'
 
 process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
 
@@ -26,7 +28,7 @@ let userService
 
 before(async () => {
   userService = new UserService(inMemoryUserRepository)
-  server = createApp({ userRepository: inMemoryUserRepository }).listen(0, '127.0.0.1')
+  server = createApp({ userRepository: inMemoryUserRepository, refreshSessionRepository: memoryRefreshSessions() }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   baseUrl = `http://127.0.0.1:${server.address().port}`
 })
@@ -74,7 +76,9 @@ test('POST /login token contains correct user claims', async () => {
   const token = body.token
 
   const verified = await userService.verifyToken(token)
-  assert.deepEqual(Object.keys(verified.payload).sort(), ['email', 'exp', 'userId'])
+  assert.equal(verified.payload.kind, 'customer')
+  assert.equal(verified.payload.tokenUse, 'access')
+  assert.equal(verified.payload.exp - verified.payload.iat, 900)
   assert.equal(verified.payload.email, 'ada@example.com')
   assert.ok(Number.isInteger(verified.payload.userId))
 })

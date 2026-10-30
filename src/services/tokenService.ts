@@ -1,54 +1,200 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { isAdminRole, type AdminRole } from '../models/adminRoles';
+import { randomUUID } from 'node:crypto';
+import { errors, jwtVerify, SignJWT, type JWTPayload } from 'jose';
 
-export interface AdminTokenPayload {
-    adminId: number;
-    role: AdminRole;
-    exp: number;
+export const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+export const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60;
+const ISSUER = 'star-elephant';
+const AUDIENCE = 'star-elephant-api';
+
+export type Principal =
+	| { kind: 'admin'; adminId: number; role: string }
+	| { kind: 'customer'; userId: number; email: string };
+export interface AccessTokenPayload extends JWTPayload {
+	adminId: number;
+	role: string;
+	exp: number;
 }
-
-export const ADMIN_TOKEN_TTL_SECONDS = 60 * 60 * 8;
-
-const b64 = (value: string | Buffer) => Buffer.from(value).toString('base64url');
+export interface RefreshTokenPayload extends JWTPayload {
+	principalId: number;
+	kind: 'admin' | 'customer';
+	sessionId: string;
+	exp: number;
+}
 
 export class TokenService {
-    constructor(private readonly secret: string) { }
+	private readonly accessKey: Uint8Array;
+	private readonly refreshKey: Uint8Array;
+	private readonly customerKey: Uint8Array;
 
-    sign(adminId: number, role: AdminRole, now = Date.now()): string {
-        const payload: AdminTokenPayload = { adminId, role, exp: Math.floor(now / 1000) + ADMIN_TOKEN_TTL_SECONDS };
-        const body = b64(JSON.stringify(payload));
-        return `${body}.${this.signature(body)}`;
-    }
+	constructor(
+		accessSecret: string,
+		refreshSecret: string,
+		customerSecret = accessSecret,
+	) {
+		for (const secret of [accessSecret, refreshSecret, customerSecret]) {
+			if (Buffer.byteLength(secret) < 32)
+				throw new Error('Token secrets must contain at least 32 bytes');
+		}
+		if (refreshSecret === accessSecret || refreshSecret === customerSecret) {
+			throw new Error('Access and refresh token secrets must be different');
+		}
+		this.accessKey = new TextEncoder().encode(accessSecret);
+		this.refreshKey = new TextEncoder().encode(refreshSecret);
+		this.customerKey = new TextEncoder().encode(customerSecret);
+	}
 
-    verify(token: string, now = Date.now()): AdminTokenPayload | null {
-        const [body, signature, ...rest] = token.split('.');
-        if (!body || !signature || rest.length > 0) return null;
+	signAccessToken(
+		admin: { adminId: number; role: string },
+		now = Date.now(),
+	): Promise<string> {
+		return this.signAccess(
+			{ kind: 'admin', adminId: admin.adminId, role: admin.role },
+			now,
+		);
+	}
 
-        const expected = Buffer.from(this.signature(body));
-        const actual = Buffer.from(signature);
-        if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+	signAccess(principal: Principal, now = Date.now()): Promise<string> {
+		const id =
+			principal.kind === 'admin' ? principal.adminId : principal.userId;
+		return this.sign(
+			{ ...principal, tokenUse: 'access' },
+			String(id),
+			principal.kind === 'admin' ? this.accessKey : this.customerKey,
+			now,
+			Math.floor(now / 1000) + ACCESS_TOKEN_TTL_SECONDS,
+		);
+	}
 
-        try {
-            const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-            if (typeof payload.adminId !== 'number' || typeof payload.exp !== 'number') return null;
-            if (typeof payload.role !== 'string' || !isAdminRole(payload.role)) return null;
-            if (payload.exp <= Math.floor(now / 1000)) return null;
-            return payload;
-        } catch {
-            return null;
-        }
-    }
+	signRefreshToken(
+		principal: Principal,
+		sessionId: string,
+		expiresAt: Date,
+		now = Date.now(),
+	): Promise<string> {
+		const principalId =
+			principal.kind === 'admin' ? principal.adminId : principal.userId;
+		return this.sign(
+			{ kind: principal.kind, principalId, sessionId, tokenUse: 'refresh' },
+			String(principalId),
+			this.refreshKey,
+			now,
+			Math.floor(expiresAt.getTime() / 1000),
+		);
+	}
 
-    private signature(body: string): string {
-        return b64(createHmac('sha256', this.secret).update(body).digest());
-    }
+	async verifyAccessToken(
+		token: string,
+		now = Date.now(),
+	): Promise<AccessTokenPayload | null> {
+		const payload = await this.verify(token, this.accessKey, now);
+		if (
+			payload?.tokenUse !== 'access' ||
+			payload.kind !== 'admin' ||
+			!this.validId(payload.adminId) ||
+			typeof payload.role !== 'string' ||
+			payload.sub !== String(payload.adminId) ||
+			typeof payload.exp !== 'number'
+		)
+			return null;
+		return {
+			...payload,
+			adminId: payload.adminId,
+			role: payload.role,
+			exp: payload.exp,
+		};
+	}
+
+	async verifyCustomerAccessToken(token: string): Promise<JWTPayload | null> {
+		const payload = await this.verify(token, this.customerKey, Date.now());
+		if (
+			payload?.tokenUse !== 'access' ||
+			payload.kind !== 'customer' ||
+			!this.validId(payload.userId) ||
+			typeof payload.email !== 'string' ||
+			payload.sub !== String(payload.userId)
+		)
+			return null;
+		return payload;
+	}
+
+	async verifyRefreshToken(
+		token: string,
+		now = Date.now(),
+	): Promise<RefreshTokenPayload | null> {
+		const payload = await this.verify(token, this.refreshKey, now);
+		if (
+			payload?.tokenUse !== 'refresh' ||
+			(payload.kind !== 'admin' && payload.kind !== 'customer') ||
+			!this.validId(payload.principalId) ||
+			payload.sub !== String(payload.principalId) ||
+			typeof payload.sessionId !== 'string' ||
+			typeof payload.jti !== 'string' ||
+			typeof payload.exp !== 'number'
+		)
+			return null;
+		return {
+			...payload,
+			principalId: payload.principalId,
+			kind: payload.kind,
+			sessionId: payload.sessionId,
+			exp: payload.exp,
+		};
+	}
+
+	private validId(value: unknown): value is number {
+		return (
+			typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+		);
+	}
+
+	private sign(
+		payload: JWTPayload,
+		subject: string,
+		key: Uint8Array,
+		now: number,
+		exp: number,
+	): Promise<string> {
+		return new SignJWT(payload)
+			.setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+			.setIssuer(ISSUER)
+			.setAudience(AUDIENCE)
+			.setSubject(subject)
+			.setJti(randomUUID())
+			.setIssuedAt(Math.floor(now / 1000))
+			.setExpirationTime(exp)
+			.sign(key);
+	}
+
+	private async verify(
+		token: string,
+		key: Uint8Array,
+		now: number,
+	): Promise<JWTPayload | null> {
+		try {
+			const { payload } = await jwtVerify(token, key, {
+				algorithms: ['HS256'],
+				typ: 'JWT',
+				issuer: ISSUER,
+				audience: AUDIENCE,
+				requiredClaims: ['exp', 'iat', 'sub', 'jti'],
+				currentDate: new Date(now),
+			});
+			return payload;
+		} catch (error) {
+			if (error instanceof errors.JOSEError) return null;
+			throw error;
+		}
+	}
 }
 
-export function createTokenService(secret = process.env.ADMIN_TOKEN_SECRET): TokenService {
-    if (secret) return new TokenService(secret);
-    if (process.env.NODE_ENV === 'production') {
-        throw new Error('ADMIN_TOKEN_SECRET environment variable is not set');
-    }
-    // Dev/test fallback: tokens are invalidated whenever the process restarts.
-    return new TokenService(randomBytes(32).toString('hex'));
+export function createTokenService(
+	accessSecret = process.env.ADMIN_ACCESS_TOKEN_SECRET,
+	refreshSecret = process.env.ADMIN_REFRESH_TOKEN_SECRET,
+): TokenService {
+	if (!accessSecret || !refreshSecret || !process.env.JWT_SECRET) {
+		throw new Error(
+			'JWT_SECRET, ADMIN_ACCESS_TOKEN_SECRET and ADMIN_REFRESH_TOKEN_SECRET must be set',
+		);
+	}
+	return new TokenService(accessSecret, refreshSecret, process.env.JWT_SECRET);
 }
