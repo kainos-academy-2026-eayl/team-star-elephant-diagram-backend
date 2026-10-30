@@ -212,16 +212,32 @@ async function main() {
         },
     ];
 
+    const customerSeedPassword = process.env.CUSTOMER_SEED_PASSWORD;
+    if (!customerSeedPassword) {
+        console.warn('CUSTOMER_SEED_PASSWORD not set: seeded customers keep placeholder hashes and cannot log in');
+    }
+    const customerSeedHash = customerSeedPassword ? await argon2.hash(customerSeedPassword, ARGON2_OPTIONS) : undefined;
+    let updatedPasswordCount = 0;
     for (const user of users) {
-        const passwordHash = await argon2.hash('Password123!', ARGON2_OPTIONS);
+        const { passwordHash: placeholderHash, ...userData } = user;
         await prisma.user.upsert({
             where: { email: user.email },
-            create: { ...user, passwordHash },
-            update: { passwordHash },
+            create: { ...userData, passwordHash: customerSeedHash ?? placeholderHash },
+            update: userData,
         });
+        if (customerSeedHash) {
+            const result = await prisma.user.updateMany({
+                where: { email: user.email, passwordHash: placeholderHash },
+                data: { passwordHash: customerSeedHash },
+            });
+            updatedPasswordCount += result.count;
+        }
     }
 
-    console.log(`${users.length} users seeded with updated passwords`);
+    console.log(`${users.length} users seeded`);
+    if (customerSeedHash) {
+        console.log(`${updatedPasswordCount} customer passwords initialized`);
+    }
 
     if ((await prisma.product.count()) === 0) {
         const result = await prisma.product.createMany({
