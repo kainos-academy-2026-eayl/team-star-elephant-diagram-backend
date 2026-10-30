@@ -2,7 +2,7 @@ import type { Basket, BasketItem } from '../models/basket';
 import type { BasketRepository } from '../repositories/basketRepository';
 import type { ProductRepository } from '../repositories/productRepository';
 import { MAX_ITEM_QUANTITY } from '../validators/basketSchema';
-import { ProductNotFoundError } from './expandProductService';
+import { ProductNotFoundError } from './productService';
 
 export class BasketQuantityError extends Error { }
 

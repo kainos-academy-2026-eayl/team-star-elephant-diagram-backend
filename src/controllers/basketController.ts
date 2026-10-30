@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { BasketQuantityError, type BasketService } from '../services/basketService';
-import { ProductNotFoundError } from '../services/expandProductService';
+import { ProductNotFoundError } from '../services/productService';
 import { addToBasketSchema } from '../validators/basketSchema';
 
 const BASKET_COOKIE = 'basketId';

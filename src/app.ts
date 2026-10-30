@@ -2,7 +2,6 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
 import { createBasketRouter } from './controllers/basketController';
-import { createExpandProductRouter } from './controllers/expandProductController';
 import { createProductRouter } from './controllers/productController';
 import { createInMemoryBasketRepository, type BasketRepository } from './repositories/basketRepository';
 import { productRepository, type ProductRepository } from './repositories/productRepository';
@@ -12,7 +11,6 @@ import { AdminUserService } from './services/AdminUserService';
 import { createTokenService, type TokenService } from './services/tokenService';
 import { adminController } from './controllers/adminController';
 import { BasketService } from './services/basketService';
-import { ExpandProductService } from './services/expandProductService';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
@@ -55,7 +53,6 @@ export function createApp({
 	app.use(adminController(new AdminUserService(adminRepository), tokenService));
 	app.use(userController(userService));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
-	app.use('/products', createExpandProductRouter(new ExpandProductService(productsRepository)));
 	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository)));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
