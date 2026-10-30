@@ -212,12 +212,16 @@ async function main() {
         },
     ];
 
-    const userResult = await prisma.user.createMany({
-        data: users,
-        skipDuplicates: true,
-    });
+    for (const user of users) {
+        const passwordHash = await argon2.hash('Password123!', ARGON2_OPTIONS);
+        await prisma.user.upsert({
+            where: { email: user.email },
+            create: { ...user, passwordHash },
+            update: { passwordHash },
+        });
+    }
 
-    console.log(`${userResult.count} users seeded`);
+    console.log(`${users.length} users seeded with updated passwords`);
 
     if ((await prisma.product.count()) === 0) {
         const result = await prisma.product.createMany({
