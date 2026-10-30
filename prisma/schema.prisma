@@ -21,6 +21,11 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 model User {
   userId         Int             @id @unique @default(autoincrement())
   forename       String          @db.VarChar(100)
@@ -33,6 +38,7 @@ model User {
   addressLine2   String          @db.VarChar(255)
   city           String          @db.VarChar(100)
   postcode       String          @db.VarChar(10)
+  status         UserStatus      @default(ACTIVE)
   orders         Order[]
   paymentDetails PaymentDetail[]
 }

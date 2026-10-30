@@ -1,7 +1,18 @@
 import argon2 from 'argon2';
 import { DASHBOARD_BY_ROLE, isAdminRole, type AdminRole } from '../models/adminRoles';
+import type {
+	AdminUserDetailsResponse,
+	AdminUserListResponse,
+	AdminUserStatusResponse,
+	AdminUserSummary,
+} from '../models/AdminUser';
+import type { UserStatus } from '../models/user';
 import type { adminRepository } from '../repositories/adminRepository';
+import type { UserRepository, UserSummaryRecord } from '../repositories/userRepository';
 import type { LoginRequest } from '../validators/loginSchema';
+
+const ADMIN_USERS_PAGE_SIZE = 20;
+const ADMIN_USER_RECENT_ORDERS = 5;
 
 export class InvalidCredentialsError extends Error {
 	constructor(message = 'Invalid email or password') {
@@ -34,8 +45,22 @@ export const ARGON2_OPTIONS = {
 	parallelism: 1,
 } as const;
 
+const toAdminStatus = (status: UserStatus) =>
+	status === 'SUSPENDED' ? 'suspended' : 'active';
+
+const toUserSummary = (user: UserSummaryRecord): AdminUserSummary => ({
+	id: user.userId,
+	name: `${user.forename} ${user.surname}`,
+	email: user.email,
+	registeredAt: user.createdAt.toISOString(),
+	status: toAdminStatus(user.status),
+});
+
 export class AdminUserService {
-	constructor(private readonly admins: adminRepository) {}
+	constructor(
+		private readonly admins: adminRepository,
+		private readonly users: UserRepository,
+	) {}
 
 	async login(data: LoginRequest): Promise<AuthenticatedAdmin> {
 		const admin = await this.admins.findByEmail(data.email);
@@ -79,5 +104,46 @@ export class AdminUserService {
 			role: admin.role,
 			dashboard: DASHBOARD_BY_ROLE[admin.role],
 		};
+	}
+
+	async listUsers({ search, page = 1 }: { search?: string | undefined; page?: number | undefined }): Promise<AdminUserListResponse> {
+		const pageSize = ADMIN_USERS_PAGE_SIZE;
+		const { users, total } = await this.users.list({
+			search,
+			skip: (page - 1) * pageSize,
+			take: pageSize,
+		});
+		return {
+			users: users.map(toUserSummary),
+			pagination: {
+				page,
+				pageSize,
+				totalPages: Math.max(1, Math.ceil(total / pageSize)),
+				totalUsers: total,
+			},
+		};
+	}
+
+	async getUserDetails(userId: number): Promise<AdminUserDetailsResponse | null> {
+		const user = await this.users.findById(userId);
+		if (!user) return null;
+		const orders = await this.users.findRecentOrders(userId, ADMIN_USER_RECENT_ORDERS);
+		return {
+			user: toUserSummary(user),
+			recentOrders: orders.map((order) => ({
+				id: order.orderId,
+				placedAt: order.orderPlacedAt.toISOString(),
+				status: order.orderStatus.toLowerCase(),
+				total: Number(order.cost.toString()),
+			})),
+			// Baskets are session-scoped and not linked to customers yet (KAN-112), so none can be shown.
+			basket: { itemCount: 0, subtotal: 0, items: [] },
+		};
+	}
+
+	async setUserStatus(userId: number, status: UserStatus): Promise<AdminUserStatusResponse | null> {
+		const updated = await this.users.updateStatus(userId, status);
+		if (!updated) return null;
+		return { user: { id: updated.userId, status: toAdminStatus(updated.status) } };
 	}
 }

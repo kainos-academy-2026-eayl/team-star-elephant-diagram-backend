@@ -21,6 +21,18 @@ const adminRateLimit = rateLimit({
 	legacyHeaders: false,
 });
 
+// Decimal digits only, up to the Postgres INTEGER upper bound; larger ids cannot exist.
+const userIdSchema = z
+	.string()
+	.regex(/^[1-9]\d{0,9}$/)
+	.transform(Number)
+	.pipe(z.number().max(2_147_483_647));
+
+const userListQuerySchema = z.object({
+	search: z.string().trim().max(100).optional(),
+	page: z.coerce.number().int().positive().max(100_000).optional(),
+});
+
 export function adminController(
 	adminService: AdminUserService,
 	tokens: TokenService,
@@ -127,6 +139,73 @@ export function adminController(
 			}
 		},
 	);
+
+	router.get(
+		'/admin/users',
+		adminRateLimit,
+		requireAdmin(tokens),
+		async (req: Request, res: Response) => {
+			const query = userListQuerySchema.safeParse(req.query);
+			if (!query.success) {
+				res.status(400).json({
+					error: 'Invalid user search',
+					details: z.flattenError(query.error).fieldErrors,
+				});
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(await adminService.listUsers(query.data));
+			} catch (error) {
+				console.error('Admin user list failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.get(
+		'/admin/users/:id',
+		adminRateLimit,
+		requireAdmin(tokens),
+		async (req: Request, res: Response) => {
+			const userId = userIdSchema.safeParse(req.params.id);
+			try {
+				const details = userId.success ? await adminService.getUserDetails(userId.data) : null;
+				if (!details) {
+					res.status(404).json({ error: 'User not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json(details);
+			} catch (error) {
+				console.error('Admin user lookup failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	for (const [action, status] of [
+		['suspend', 'SUSPENDED'],
+		['reactivate', 'ACTIVE'],
+	] as const) {
+		router.post(
+			`/admin/users/:id/${action}`,
+			adminRateLimit,
+			requireAdmin(tokens),
+			async (req: Request, res: Response) => {
+				const userId = userIdSchema.safeParse(req.params.id);
+				try {
+					const result = userId.success ? await adminService.setUserStatus(userId.data, status) : null;
+					if (!result) {
+						res.status(404).json({ error: 'User not found' });
+						return;
+					}
+					res.set('Cache-Control', 'no-store').json(result);
+				} catch (error) {
+					console.error(`Admin user ${action} failed`, error);
+					res.status(500).json({ error: 'Internal server error' });
+				}
+			},
+		);
+	}
 
 	return router;
 }
