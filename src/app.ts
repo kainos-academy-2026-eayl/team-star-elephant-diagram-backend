@@ -15,6 +15,9 @@ import { userController } from './controllers/userController';
 import { authController } from './controllers/authController';
 import { AuthSessionService } from './services/authSessionService';
 import { prismaRefreshSessionRepository, type RefreshSessionRepository } from './repositories/refreshSessionRepository';
+import { prismaPasswordResetRepository, type PasswordResetRepository } from './repositories/passwordResetRepository';
+import { createConsoleResetDelivery, PasswordResetService, type PasswordResetDelivery } from './services/passwordResetService';
+import { passwordResetController } from './controllers/passwordResetController';
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
@@ -22,6 +25,8 @@ export interface AppDependencies {
 	adminRepository?: adminRepository;
 	tokenService?: TokenService;
 	refreshSessionRepository?: RefreshSessionRepository;
+	passwordResetRepository?: PasswordResetRepository;
+	passwordResetDelivery?: PasswordResetDelivery;
 }
 
 export function createApp({
@@ -30,6 +35,8 @@ export function createApp({
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
 	refreshSessionRepository = prismaRefreshSessionRepository,
+	passwordResetRepository = prismaPasswordResetRepository,
+	passwordResetDelivery = createConsoleResetDelivery(),
 }: AppDependencies = {}): Express {
 	const app = express();
 
@@ -58,6 +65,7 @@ export function createApp({
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
 	app.use(adminController(adminService, tokenService, sessions));
 	app.use(authController(sessions, adminService, userService));
+	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
