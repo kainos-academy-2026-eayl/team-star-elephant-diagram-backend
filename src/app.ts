@@ -3,13 +3,16 @@ import cookieParser from 'cookie-parser';
 import type { Options as RateLimitOptions } from 'express-rate-limit';
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
+import { createBasketRouter } from './controllers/basketController';
 import { createProductRouter } from './controllers/productController';
+import { createInMemoryBasketRepository, type BasketRepository } from './repositories/basketRepository';
 import { productRepository, type ProductRepository } from './repositories/productRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
 import { prismaAdminUserRepository, type adminRepository } from './repositories/adminRepository';
 import { AdminUserService } from './services/AdminUserService';
 import { createTokenService, type TokenService } from './services/tokenService';
 import { adminController } from './controllers/adminController';
+import { BasketService } from './services/basketService';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
@@ -19,6 +22,7 @@ import { prismaRefreshSessionRepository, type RefreshSessionRepository } from '.
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
+	basketRepository?: BasketRepository;
 	userRepository?: UserRepository;
 	adminRepository?: adminRepository;
 	tokenService?: TokenService;
@@ -29,6 +33,7 @@ export interface AppDependencies {
 
 export function createApp({
 	productRepository: productsRepository = productRepository,
+	basketRepository = createInMemoryBasketRepository(),
 	userRepository = prismaUserRepository,
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
@@ -62,6 +67,7 @@ export function createApp({
 
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
+	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository)));
 	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 
