@@ -24,6 +24,7 @@ export interface AppDependencies {
 	tokenService?: TokenService;
 	refreshSessionRepository?: RefreshSessionRepository;
 	authRateLimitOptions?: Partial<RateLimitOptions>;
+	trustedProxyAddresses?: string[];
 }
 
 export function createApp({
@@ -33,8 +34,10 @@ export function createApp({
 	tokenService = createTokenService(),
 	refreshSessionRepository = prismaRefreshSessionRepository,
 	authRateLimitOptions = {},
+	trustedProxyAddresses = process.env.TRUSTED_PROXY_IPS?.split(',').map((address) => address.trim()).filter(Boolean) ?? [],
 }: AppDependencies = {}): Express {
 	const app = express();
+	app.set('trust proxy', trustedProxyAddresses);
 
 	nunjucks.configure(join(import.meta.dirname, 'views'), {
 		autoescape: true,

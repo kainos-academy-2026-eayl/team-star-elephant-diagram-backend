@@ -69,3 +69,56 @@ for (const path of ['/login', '/admin/login', '/register']) {
     assert.deepEqual(await blocked.json(), { error: 'Too many requests, please try again later' })
   })
 }
+
+test('trusted proxy forwarding gives each client an independent auth rate limit', async () => {
+  const proxyServer = createApp({
+    userRepository: emptyUserRepository,
+    adminRepository: emptyAdminRepository,
+    refreshSessionRepository: memoryRefreshSessions(),
+    authRateLimitOptions: { limit: 1 },
+    trustedProxyAddresses: ['127.0.0.1'],
+  }).listen(0, '127.0.0.1')
+  await once(proxyServer, 'listening')
+  const proxyBaseUrl = `http://127.0.0.1:${proxyServer.address().port}`
+
+  const postWithForwardedAddress = (address) =>
+    fetch(`${proxyBaseUrl}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': address },
+      body: JSON.stringify({}),
+    })
+
+  try {
+    assert.equal((await postWithForwardedAddress('203.0.113.10')).status, 400)
+    assert.equal((await postWithForwardedAddress('203.0.113.11')).status, 400)
+    assert.equal((await postWithForwardedAddress('203.0.113.10')).status, 429)
+  } finally {
+    await new Promise((resolve) => proxyServer.close(resolve))
+  }
+})
+
+test('untrusted forwarding headers do not change the auth rate-limit key', async () => {
+  const proxyServer = createApp({
+    userRepository: emptyUserRepository,
+    adminRepository: emptyAdminRepository,
+    refreshSessionRepository: memoryRefreshSessions(),
+    authRateLimitOptions: { limit: 1 },
+    trustedProxyAddresses: ['192.0.2.1'],
+  }).listen(0, '127.0.0.1')
+  await once(proxyServer, 'listening')
+  const proxyBaseUrl = `http://127.0.0.1:${proxyServer.address().port}`
+
+  const postWithForwardedAddress = (address) =>
+    fetch(`${proxyBaseUrl}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': address },
+      body: JSON.stringify({}),
+    })
+
+  try {
+    assert.equal((await postWithForwardedAddress('203.0.113.10')).status, 400)
+    assert.equal((await postWithForwardedAddress('203.0.113.11')).status, 429)
+  } finally {
+    await new Promise((resolve) => proxyServer.close(resolve))
+  }
+})

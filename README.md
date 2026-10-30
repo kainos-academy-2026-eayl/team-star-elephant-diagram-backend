@@ -135,6 +135,13 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
    A TLS proxy is also supported; preserve the public Host header. See the
    frontend README for details. Keep backend HTTP traffic on a trusted private
    connection rather than exposing it across an untrusted network.
+   If the backend receives requests through a proxy, set `TRUSTED_PROXY_IPS`
+   to a comma-separated list of that proxy's IP addresses or narrow CIDR ranges.
+   Configure the proxy to set or append the actual client address in
+   `X-Forwarded-For`, not pass client-supplied forwarding values through
+   unchanged. Express will only use forwarding headers from configured proxy
+   addresses. Leave this unset when the backend is accessed directly, and
+   never trust all proxy addresses.
 
 ### API
 
