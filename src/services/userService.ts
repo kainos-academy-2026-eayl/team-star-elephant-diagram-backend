@@ -67,7 +67,8 @@ export class UserService {
 	}
 
 	async findById(userId: number): Promise<User | null> {
-		return this.users.findById(userId);
+		const user = await this.users.findById(userId);
+		return user?.status === 'SUSPENDED' ? null : user;
 	}
 
 	async login(data: LoginRequest): Promise<string> {

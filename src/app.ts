@@ -68,7 +68,7 @@ export function createApp({
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
 	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository)));
-	app.use(adminController(adminService, tokenService, sessions));
+	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
