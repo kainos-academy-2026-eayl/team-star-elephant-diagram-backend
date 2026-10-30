@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
 import { createAuthRateLimiter } from '../middleware/authRateLimiter';
@@ -40,6 +40,23 @@ export function adminController(
 	rateLimitOptions: Partial<RateLimitOptions> = {},
 ) {
 	const router = Router();
+	const requireCurrentAdmin = async (
+		_req: Request,
+		res: Response,
+		next: NextFunction,
+	): Promise<void> => {
+		try {
+			const admin = await adminService.findById(res.locals.admin?.adminId ?? -1);
+			if (!admin) {
+				res.status(401).json({ error: 'Authentication required' });
+				return;
+			}
+			next();
+		} catch (error) {
+			console.error('Admin lookup failed', error);
+			res.status(500).json({ error: 'Internal server error' });
+		}
+	};
 
 	router.post('/admin/login', createAuthRateLimiter(rateLimitOptions), async (req: Request, res: Response) => {
 		const loginValidation = loginSchema.safeParse(req.body);
@@ -144,6 +161,7 @@ export function adminController(
 		'/admin/users',
 		adminRateLimit,
 		requireAdmin(tokens),
+		requireCurrentAdmin,
 		async (req: Request, res: Response) => {
 			const query = userListQuerySchema.safeParse(req.query);
 			if (!query.success) {
@@ -166,6 +184,7 @@ export function adminController(
 		'/admin/users/:id',
 		adminRateLimit,
 		requireAdmin(tokens),
+		requireCurrentAdmin,
 		async (req: Request, res: Response) => {
 			const userId = userIdSchema.safeParse(req.params.id);
 			try {
@@ -190,6 +209,7 @@ export function adminController(
 			`/admin/users/:id/${action}`,
 			adminRateLimit,
 			requireAdmin(tokens),
+			requireCurrentAdmin,
 			async (req: Request, res: Response) => {
 				const userId = userIdSchema.safeParse(req.params.id);
 				try {

@@ -58,12 +58,13 @@ const userRepository = {
 		return { userId, status };
 	},
 };
+const admins = new Map();
 const adminRepository = {
 	async findByEmail() {
 		return null;
 	},
-	async findById() {
-		return null;
+	async findById(adminId) {
+		return admins.get(adminId) ?? null;
 	},
 };
 
@@ -104,6 +105,8 @@ const customer = (userId, forename, surname, email, overrides = {}) => ({
 
 beforeEach(() => {
 	users.clear();
+	admins.clear();
+	admins.set(1, { adminId: 1, forename: 'Test', surname: 'Admin', email: 'admin@example.com', role: 'SuperAdmin' });
 	orders.length = 0;
 	users.set(1, customer(1, 'Ada', 'Lovelace', 'ada@example.com'));
 	users.set(2, customer(2, 'Grace', 'Hopper', 'grace@example.com'));
@@ -249,6 +252,24 @@ test('suspended customers cannot log in and get the standard invalid credentials
 	assert.ok((await reactivated.json()).accessToken);
 });
 
+test('suspending a logged-in customer rejects refresh and profile access', async () => {
+	const loginResponse = await customerLogin();
+	assert.equal(loginResponse.status, 200);
+	const credentials = await loginResponse.json();
+	const refreshCookie = loginResponse.headers.getSetCookie()[0].split(';', 1)[0];
+
+	assert.equal((await post('/admin/users/1/suspend')).status, 200);
+	const refresh = await fetch(`${url}/auth/refresh`, {
+		method: 'POST',
+		headers: { cookie: refreshCookie },
+	});
+	assert.equal(refresh.status, 401);
+	assert.equal(refresh.headers.getSetCookie()[0].startsWith('refreshToken=;'), true);
+
+	const profile = await get('/profile', credentials.accessToken);
+	assert.equal(profile.status, 401);
+});
+
 test('admin user endpoints require an admin access token', async () => {
 	const customerToken = await tokens.signAccess({ kind: 'customer', userId: 1, email: 'ada@example.com' });
 	for (const token of [undefined, 'not-a-jwt', customerToken]) {
@@ -268,6 +289,27 @@ test('admin user endpoints require an admin access token', async () => {
 	}
 	assert.equal(users.get(1).status, 'ACTIVE');
 	assert.equal(users.get(3).status, 'SUSPENDED');
+});
+
+test('admin user endpoints require a live admin with a recognised role', async () => {
+	const admin = admins.get(1);
+	const paths = [
+		['GET', '/admin/users'],
+		['GET', '/admin/users/1'],
+		['POST', '/admin/users/1/suspend'],
+		['POST', '/admin/users/3/reactivate'],
+	];
+	try {
+		admins.delete(1);
+		for (const [method, path] of paths)
+			assert.equal((await request(method, path)).status, 401, `${method} ${path} for deleted admin`);
+
+		admins.set(1, { ...admin, role: 'Intern' });
+		for (const [method, path] of paths)
+			assert.equal((await request(method, path)).status, 401, `${method} ${path} for invalid role`);
+	} finally {
+		admins.set(1, admin);
+	}
 });
 
 test('admin user endpoints return 500 without leaking details on repository failure', async () => {
