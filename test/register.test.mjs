@@ -5,6 +5,10 @@ import argon2 from 'argon2'
 import { createApp } from '../src/app.ts'
 import { DuplicateEmailError } from '../src/repositories/userRepository.ts'
 import { ARGON2_OPTIONS } from '../src/services/userService.ts'
+import { memoryRefreshSessions } from './helpers/refreshSessions.mjs'
+import './helpers/authEnvironment.mjs'
+
+process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
 
 process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
 
@@ -15,7 +19,7 @@ const inMemoryUserRepository = {
   },
   async create(newUser) {
     if (users.has(newUser.email)) throw new DuplicateEmailError()
-    const user = { productId: users.size + 1, ...newUser }
+    const user = { userId: users.size + 1, ...newUser }
     users.set(user.email, user)
     const { passwordHash: _passwordHash, ...createdUser } = user
     return createdUser
@@ -26,7 +30,7 @@ let server
 let baseUrl
 
 before(async () => {
-  server = createApp({ userRepository: inMemoryUserRepository }).listen(0, '127.0.0.1')
+  server = createApp({ userRepository: inMemoryUserRepository, refreshSessionRepository: memoryRefreshSessions() }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   baseUrl = `http://127.0.0.1:${server.address().port}`
 })

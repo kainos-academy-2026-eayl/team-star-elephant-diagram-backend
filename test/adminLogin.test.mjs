@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { after, before, test } from 'node:test'
 import argon2 from 'argon2'
+import './helpers/authEnvironment.mjs'
 import { createApp } from '../src/app.ts'
 import { ARGON2_OPTIONS } from '../src/services/userService.ts'
+import { memoryRefreshSessions } from './helpers/refreshSessions.mjs'
 
 process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
 
@@ -31,7 +33,10 @@ before(async () => {
   })
   admins.set('broken@example.com', { adminId: 10, forename: 'B', surname: 'B', email: 'broken@example.com', role: 'Admin', passwordHash: 'PLACEHOLDER_HASH' })
   admins.set('norole@example.com', { adminId: 11, forename: 'N', surname: 'R', email: 'norole@example.com', role: 'Intern', passwordHash })
-  server = createApp({ adminRepository: inMemoryAdminRepository }).listen(0, '127.0.0.1')
+  server = createApp({
+    adminRepository: inMemoryAdminRepository,
+    refreshSessionRepository: memoryRefreshSessions(),
+  }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   baseUrl = `http://127.0.0.1:${server.address().port}`
 })

@@ -12,9 +12,13 @@ export class DuplicateEmailError extends Error {
 export interface UserRepository {
   create(user: NewUser): Promise<CreatedUser>;
   findByEmail(email: string): Promise<User | null>;
+  findById(userId: number): Promise<User | null>;
 }
 
 export const prismaUserRepository: UserRepository = {
+  findById(userId) {
+    return prisma.user.findUnique({ where: { userId } });
+  },
   async create({ forename, surname, email, passwordHash, createdAt, modifiedAt, addressLine1, addressLine2, city, postcode }) {
     try {
       return await prisma.user.create({

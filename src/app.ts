@@ -1,4 +1,5 @@
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
+import cookieParser from 'cookie-parser';
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
 import { createProductRouter } from './controllers/productController';
@@ -11,12 +12,16 @@ import { adminController } from './controllers/adminController';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
 import { userController } from './controllers/userController';
+import { authController } from './controllers/authController';
+import { AuthSessionService } from './services/authSessionService';
+import { prismaRefreshSessionRepository, type RefreshSessionRepository } from './repositories/refreshSessionRepository';
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
 	userRepository?: UserRepository;
 	adminRepository?: adminRepository;
 	tokenService?: TokenService;
+	refreshSessionRepository?: RefreshSessionRepository;
 }
 
 export function createApp({
@@ -24,6 +29,7 @@ export function createApp({
 	userRepository = prismaUserRepository,
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
+	refreshSessionRepository = prismaRefreshSessionRepository,
 }: AppDependencies = {}): Express {
 	const app = express();
 
@@ -35,6 +41,7 @@ export function createApp({
 	app.set('view engine', 'njk');
 
 	app.use(express.json({ limit: '100kb' }));
+	app.use(cookieParser());
 
 	// app.get('/', (_req: Request, res: Response) => {
 	//   res.render('index');
@@ -44,10 +51,13 @@ export function createApp({
 		res.json({ status: 'UP', time: new Date().toISOString() });
 	});
 	const userService = new UserService(userRepository);
+	const adminService = new AdminUserService(adminRepository);
+	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
 
-	app.use(userController(userService));
+	app.use(userController(userService, sessions, tokenService));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
-	app.use(adminController(new AdminUserService(adminRepository), tokenService));
+	app.use(adminController(adminService, tokenService, sessions));
+	app.use(authController(sessions, adminService, userService));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {
