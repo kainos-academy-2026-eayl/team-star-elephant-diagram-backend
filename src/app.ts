@@ -1,5 +1,6 @@
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import cookieParser from 'cookie-parser';
+import type { Options as RateLimitOptions } from 'express-rate-limit';
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
 import { createProductRouter } from './controllers/productController';
@@ -22,6 +23,7 @@ export interface AppDependencies {
 	adminRepository?: adminRepository;
 	tokenService?: TokenService;
 	refreshSessionRepository?: RefreshSessionRepository;
+	authRateLimitOptions?: Partial<RateLimitOptions>;
 }
 
 export function createApp({
@@ -30,6 +32,7 @@ export function createApp({
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
 	refreshSessionRepository = prismaRefreshSessionRepository,
+	authRateLimitOptions = {},
 }: AppDependencies = {}): Express {
 	const app = express();
 
@@ -54,9 +57,9 @@ export function createApp({
 	const adminService = new AdminUserService(adminRepository);
 	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
 
-	app.use(userController(userService, sessions, tokenService));
+	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
-	app.use(adminController(adminService, tokenService, sessions));
+	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {

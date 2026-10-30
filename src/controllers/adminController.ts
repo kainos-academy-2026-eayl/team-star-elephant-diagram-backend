@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
+import { createAuthRateLimiter } from '../middleware/authRateLimiter';
 import { DASHBOARD_BY_ROLE } from '../models/adminRoles';
 import { requireAdmin } from '../middleware/requireAdmin';
 import {
@@ -24,10 +25,11 @@ export function adminController(
 	adminService: AdminUserService,
 	tokens: TokenService,
 	sessions: AuthSessionService,
+	rateLimitOptions: Partial<RateLimitOptions> = {},
 ) {
 	const router = Router();
 
-	router.post('/admin/login', async (req: Request, res: Response) => {
+	router.post('/admin/login', createAuthRateLimiter(rateLimitOptions), async (req: Request, res: Response) => {
 		const loginValidation = loginSchema.safeParse(req.body);
 
 		if (!loginValidation.success) {
