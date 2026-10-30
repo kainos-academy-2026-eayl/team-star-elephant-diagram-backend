@@ -1,5 +1,7 @@
 import { Router, type Request, type Response } from 'express';
+import type { Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
+import { createAuthRateLimiter } from '../middleware/authRateLimiter';
 import { DuplicateEmailError } from '../repositories/userRepository';
 import { InvalidUserCredentialsError, type UserService } from '../services/userService';
 import type { AuthSessionService } from '../services/authSessionService';
@@ -8,10 +10,15 @@ import { sendTokens } from './authController';
 import { loginSchema } from '../validators/loginSchema';
 import { registerSchema } from '../validators/registerSchema';
 
-export function userController(userService: UserService, sessions: AuthSessionService, tokens: TokenService): Router {
+export function userController(
+    userService: UserService,
+    sessions: AuthSessionService,
+    tokens: TokenService,
+    rateLimitOptions: Partial<RateLimitOptions> = {},
+): Router {
     const router = Router();
 
-    router.post('/register', async (req: Request, res: Response) => {
+    router.post('/register', createAuthRateLimiter(rateLimitOptions), async (req: Request, res: Response) => {
         const registerValidation = registerSchema.safeParse(req.body);
         if (!registerValidation.success) {
             res.status(400).json({ error: 'Invalid registration details', details: z.flattenError(registerValidation.error).fieldErrors });
@@ -31,7 +38,7 @@ export function userController(userService: UserService, sessions: AuthSessionSe
         }
     });
 
-    router.post('/login', async (req: Request, res: Response) => {
+    router.post('/login', createAuthRateLimiter(rateLimitOptions), async (req: Request, res: Response) => {
         const loginValidation = loginSchema.safeParse(req.body);
         if (!loginValidation.success) {
             res.status(400).json({

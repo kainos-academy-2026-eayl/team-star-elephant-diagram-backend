@@ -36,6 +36,7 @@ before(async () => {
   server = createApp({
     adminRepository: inMemoryAdminRepository,
     refreshSessionRepository: memoryRefreshSessions(),
+    authRateLimitOptions: { limit: 1000 },
   }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   baseUrl = `http://127.0.0.1:${server.address().port}`

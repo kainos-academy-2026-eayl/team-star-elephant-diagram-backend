@@ -3,7 +3,7 @@ import { once } from 'node:events'
 import { after, before, beforeEach, test } from 'node:test'
 import * as jose from 'jose'
 import { createApp } from '../src/app.ts'
-import { UserService } from '../src/services/userService.ts'
+import { InvalidUserCredentialsError, UserService } from '../src/services/userService.ts'
 import { memoryRefreshSessions } from './helpers/refreshSessions.mjs'
 import './helpers/authEnvironment.mjs'
 
@@ -28,7 +28,7 @@ let userService
 
 before(async () => {
   userService = new UserService(inMemoryUserRepository)
-  server = createApp({ userRepository: inMemoryUserRepository, refreshSessionRepository: memoryRefreshSessions() }).listen(0, '127.0.0.1')
+  server = createApp({ userRepository: inMemoryUserRepository, refreshSessionRepository: memoryRefreshSessions(), authRateLimitOptions: { limit: 1000 } }).listen(0, '127.0.0.1')
   await once(server, 'listening')
   baseUrl = `http://127.0.0.1:${server.address().port}`
 })
@@ -195,4 +195,31 @@ test('POST /login returns token in response body', async () => {
 
   const parts = body.token.split('.')
   assert.equal(parts.length, 3, 'Token should be a valid JWT with 3 parts')
+})
+
+test('POST /login returns 400 for a password longer than 128 characters', async () => {
+  await register(validBody)
+
+  const response = await login({ email: validBody.email, password: 'x'.repeat(129) })
+  assert.equal(response.status, 400)
+  const body = await response.json()
+  assert.equal(body.error, 'Invalid login details')
+  assert.ok(body.details.password)
+})
+
+test('POST /login returns 401, not 500, when the stored password hash is malformed', async () => {
+  users.set('broken@example.com', { userId: 99, email: 'broken@example.com', passwordHash: 'PLACEHOLDER_HASH' })
+
+  const response = await login({ email: 'broken@example.com', password: 'correct-horse' })
+  assert.equal(response.status, 401)
+  assert.deepEqual(await response.json(), { error: 'Invalid email or password' })
+})
+
+test('UserService.authenticate treats a malformed stored hash the same as a wrong password', async () => {
+  users.set('broken@example.com', { userId: 99, email: 'broken@example.com', passwordHash: 'not-an-argon2-hash' })
+
+  await assert.rejects(
+    () => userService.authenticate({ email: 'broken@example.com', password: 'correct-horse' }),
+    InvalidUserCredentialsError
+  )
 })

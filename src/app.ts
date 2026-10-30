@@ -1,5 +1,6 @@
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import cookieParser from 'cookie-parser';
+import type { Options as RateLimitOptions } from 'express-rate-limit';
 import nunjucks from 'nunjucks';
 import { join } from 'node:path';
 import { createBasketRouter } from './controllers/basketController';
@@ -29,6 +30,8 @@ export interface AppDependencies {
 	adminRepository?: adminRepository;
 	tokenService?: TokenService;
 	refreshSessionRepository?: RefreshSessionRepository;
+	authRateLimitOptions?: Partial<RateLimitOptions>;
+	trustedProxyAddresses?: string[];
 	passwordResetRepository?: PasswordResetRepository;
 	passwordResetDelivery?: PasswordResetDelivery;
 }
@@ -40,10 +43,13 @@ export function createApp({
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
 	refreshSessionRepository = prismaRefreshSessionRepository,
+	authRateLimitOptions = {},
+	trustedProxyAddresses = process.env.TRUSTED_PROXY_IPS?.split(',').map((address) => address.trim()).filter(Boolean) ?? [],
 	passwordResetRepository = prismaPasswordResetRepository,
 	passwordResetDelivery = createConsoleResetDelivery(),
 }: AppDependencies = {}): Express {
 	const app = express();
+	app.set('trust proxy', trustedProxyAddresses);
 
 	nunjucks.configure(join(import.meta.dirname, 'views'), {
 		autoescape: true,
@@ -66,10 +72,10 @@ export function createApp({
 	const adminService = new AdminUserService(adminRepository);
 	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
 
-	app.use(userController(userService, sessions, tokenService));
+	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
 	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository)));
-	app.use(adminController(adminService, tokenService, sessions));
+	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
 

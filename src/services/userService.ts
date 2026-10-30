@@ -49,7 +49,14 @@ export class UserService {
 		if (!user) {
 			throw new InvalidUserCredentialsError();
 		}
-		if (!await argon2.verify(user.passwordHash, data.password)) {
+		let passwordMatches = false;
+		try {
+			passwordMatches = await argon2.verify(user.passwordHash, data.password);
+		} catch {
+			// A malformed stored hash must be indistinguishable from a wrong password.
+			passwordMatches = false;
+		}
+		if (!passwordMatches) {
 			throw new InvalidUserCredentialsError();
 		}
 		return user;
