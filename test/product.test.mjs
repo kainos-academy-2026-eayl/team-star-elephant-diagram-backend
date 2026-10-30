@@ -32,6 +32,10 @@ before(async () => {
       if (repositoryError) throw repositoryError;
       return catalogue.find((product) => product.productId === id) ?? null;
     },
+    async findByIds(ids) {
+      if (repositoryError) throw repositoryError;
+      return catalogue.filter((product) => ids.includes(product.productId));
+    },
   } });
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
