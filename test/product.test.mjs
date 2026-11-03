@@ -124,24 +124,36 @@ test('GET /products logs service errors and returns a generic 500 response', asy
   assert.deepEqual(log.mock.calls[0].arguments, ['Product retrieval failed.', serviceError]);
 });
 
-test('findById loads the product with summed inventory and keeps prices in pounds', async (t) => {
+test('findById loads the product with summed inventory, ordered images and prices in pounds', async (t) => {
   const originalFindUnique = prisma.product.findUnique;
   const findUnique = t.mock.fn(async () => ({
     productId: 1, name: 'CoreBook 14 Essential', category: 'Laptops', description: 'Laptop',
     price: new Prisma.Decimal('349.99'), imageURL: 'https://example.com/1.jpg',
     createdAt: new Date(), modifiedAt: new Date(),
     inventory: [{ quantity: 3 }, { quantity: 4 }],
+    images: [
+      { url: 'https://example.com/1-front.jpg', altText: 'Front' },
+      { url: 'https://example.com/1-side.jpg', altText: null },
+    ],
   }));
   prisma.product.findUnique = findUnique;
   t.after(() => { prisma.product.findUnique = originalFindUnique; });
 
   assert.deepEqual(await productRepository.findById(1), {
     productId: 1, name: 'CoreBook 14 Essential', category: 'Laptops', description: 'Laptop',
-    price: 349.99, imageURL: 'https://example.com/1.jpg', inventory: { quantity: 7 },
+    price: 349.99, imageURL: 'https://example.com/1.jpg',
+    images: [
+      { url: 'https://example.com/1-front.jpg', altText: 'Front' },
+      { url: 'https://example.com/1-side.jpg', altText: null },
+    ],
+    inventory: { quantity: 7 },
   });
   assert.deepEqual(findUnique.mock.calls[0].arguments, [{
     where: { productId: 1 },
-    include: { inventory: { select: { quantity: true } } },
+    include: {
+      inventory: { select: { quantity: true } },
+      images: { orderBy: { position: 'asc' }, select: { url: true, altText: true } },
+    },
   }]);
 });
 

@@ -16,7 +16,10 @@ export const productRepository: ProductRepository = {
   async findById(productId) {
     const product = await prisma.product.findUnique({
       where: { productId },
-      include: { inventory: { select: { quantity: true } } },
+      include: {
+        inventory: { select: { quantity: true } },
+        images: { orderBy: { position: 'asc' }, select: { url: true, altText: true } },
+      },
     });
 
     if (!product) {
@@ -33,6 +36,7 @@ export const productRepository: ProductRepository = {
       description: product.description,
       price: product.price.toNumber(),
       imageURL: product.imageURL,
+      images: product.images,
       inventory: { quantity },
     };
   },

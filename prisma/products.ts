@@ -9,6 +9,7 @@ const images = {
     Headsets: 'https://images.unsplash.com/photo-1599669454699-248893623440?auto=format&fit=crop&w=1000&q=80',
 };
 
+export type SeedProduct = Prisma.ProductCreateManyInput & { images?: string[]; };
 // Fictional products with representative GBP prices, not live retail offers.
 export const products = [
     {
@@ -361,4 +362,16 @@ export const products = [
         price: '74.99',
         imageURL: images.Headsets,
     },
-] satisfies Prisma.ProductCreateManyInput[];
+    {
+        name: 'StudioBook 16 Pro',
+        category: 'Laptops',
+        description: 'New amazing cool StudioBook 16 Pro with cutting-edge performance and sleek design for professionals.',
+        price: '1299.99',
+        imageURL: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=1000&q=80',
+        images: [
+            'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=1000&q=80',
+            'https://images.unsplash.com/photo-1525547719571-a2d4ac8945e2?auto=format&fit=crop&w=1000&q=80',
+            'https://images.unsplash.com/photo-1531297484001-80022131f5a1?auto=format&fit=crop&w=1000&q=80',
+        ],
+    },
+] satisfies SeedProduct[];

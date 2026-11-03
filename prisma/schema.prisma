@@ -59,6 +59,8 @@ model Product {
   inventory   Inventory[]
   basketItems BasketItem[]
   orderItems  OrderItem[]
+  images      ProductImage[]
+
 
   @@index([name])
 }
@@ -168,4 +170,15 @@ model BasketItem {
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@unique([basketId, productId])
+}
+
+model ProductImage {
+  imageId   Int     @id @default(autoincrement()) @map("image_id")
+  productId Int     @map("product_id")
+  product   Product @relation(fields: [productId], references: [productId], onDelete: Cascade)
+  url       String  @db.VarChar(255)
+  altText   String? @map("alt_text") @db.VarChar(255)
+  position  Int     @default(0)
+
+  @@unique([productId, position])
 }
