@@ -59,11 +59,16 @@ export class UserService {
 		if (!passwordMatches) {
 			throw new InvalidUserCredentialsError();
 		}
+		// Suspended accounts get the same response as bad credentials so suspension is not disclosed.
+		if (user.status === 'SUSPENDED') {
+			throw new InvalidUserCredentialsError();
+		}
 		return user;
 	}
 
 	async findById(userId: number): Promise<User | null> {
-		return this.users.findById(userId);
+		const user = await this.users.findById(userId);
+		return user?.status === 'SUSPENDED' ? null : user;
 	}
 
 	async login(data: LoginRequest): Promise<string> {

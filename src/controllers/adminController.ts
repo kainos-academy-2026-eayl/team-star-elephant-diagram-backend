@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
 import { createAuthRateLimiter } from '../middleware/authRateLimiter';
@@ -21,6 +21,18 @@ const adminRateLimit = rateLimit({
 	legacyHeaders: false,
 });
 
+// Decimal digits only, up to the Postgres INTEGER upper bound; larger ids cannot exist.
+const userIdSchema = z
+	.string()
+	.regex(/^[1-9]\d{0,9}$/)
+	.transform(Number)
+	.pipe(z.number().max(2_147_483_647));
+
+const userListQuerySchema = z.object({
+	search: z.string().trim().max(100).optional(),
+	page: z.coerce.number().int().positive().max(100_000).optional(),
+});
+
 export function adminController(
 	adminService: AdminUserService,
 	tokens: TokenService,
@@ -28,6 +40,23 @@ export function adminController(
 	rateLimitOptions: Partial<RateLimitOptions> = {},
 ) {
 	const router = Router();
+	const requireCurrentAdmin = async (
+		_req: Request,
+		res: Response,
+		next: NextFunction,
+	): Promise<void> => {
+		try {
+			const admin = await adminService.findById(res.locals.admin?.adminId ?? -1);
+			if (!admin) {
+				res.status(401).json({ error: 'Authentication required' });
+				return;
+			}
+			next();
+		} catch (error) {
+			console.error('Admin lookup failed', error);
+			res.status(500).json({ error: 'Internal server error' });
+		}
+	};
 
 	router.post('/admin/login', createAuthRateLimiter(rateLimitOptions), async (req: Request, res: Response) => {
 		const loginValidation = loginSchema.safeParse(req.body);
@@ -127,6 +156,76 @@ export function adminController(
 			}
 		},
 	);
+
+	router.get(
+		'/admin/users',
+		adminRateLimit,
+		requireAdmin(tokens),
+		requireCurrentAdmin,
+		async (req: Request, res: Response) => {
+			const query = userListQuerySchema.safeParse(req.query);
+			if (!query.success) {
+				res.status(400).json({
+					error: 'Invalid user search',
+					details: z.flattenError(query.error).fieldErrors,
+				});
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(await adminService.listUsers(query.data));
+			} catch (error) {
+				console.error('Admin user list failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.get(
+		'/admin/users/:id',
+		adminRateLimit,
+		requireAdmin(tokens),
+		requireCurrentAdmin,
+		async (req: Request, res: Response) => {
+			const userId = userIdSchema.safeParse(req.params.id);
+			try {
+				const details = userId.success ? await adminService.getUserDetails(userId.data) : null;
+				if (!details) {
+					res.status(404).json({ error: 'User not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json(details);
+			} catch (error) {
+				console.error('Admin user lookup failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	for (const [action, status] of [
+		['suspend', 'SUSPENDED'],
+		['reactivate', 'ACTIVE'],
+	] as const) {
+		router.post(
+			`/admin/users/:id/${action}`,
+			adminRateLimit,
+			requireAdmin(tokens),
+			requireCurrentAdmin,
+			async (req: Request, res: Response) => {
+				const userId = userIdSchema.safeParse(req.params.id);
+				try {
+					const result = userId.success ? await adminService.setUserStatus(userId.data, status) : null;
+					if (!result) {
+						res.status(404).json({ error: 'User not found' });
+						return;
+					}
+					res.set('Cache-Control', 'no-store').json(result);
+				} catch (error) {
+					console.error(`Admin user ${action} failed`, error);
+					res.status(500).json({ error: 'Internal server error' });
+				}
+			},
+		);
+	}
 
 	return router;
 }

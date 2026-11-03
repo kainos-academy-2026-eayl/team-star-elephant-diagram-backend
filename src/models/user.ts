@@ -24,8 +24,11 @@ export interface CreatedUser {
   postcode: string;
 }
 
+export type UserStatus = 'ACTIVE' | 'SUSPENDED';
+
 export interface User extends NewUser {
   userId: number;
   email: string;
   passwordHash: string;
+  status: UserStatus;
 }

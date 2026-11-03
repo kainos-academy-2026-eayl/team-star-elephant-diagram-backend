@@ -55,6 +55,36 @@ test('auth rate limiter uses 10 requests per 15 minutes with standard headers on
   assert.equal(AUTH_RATE_LIMIT_OPTIONS.legacyHeaders, false)
 })
 
+test('admin login uses the configured auth rate-limit options', async () => {
+  const overrideServer = createApp({
+    userRepository: emptyUserRepository,
+    adminRepository: emptyAdminRepository,
+    refreshSessionRepository: memoryRefreshSessions(),
+    authRateLimitOptions: { limit: 1 },
+  }).listen(0, '127.0.0.1')
+  await once(overrideServer, 'listening')
+  const overrideUrl = `http://127.0.0.1:${overrideServer.address().port}`
+
+  try {
+    const first = await fetch(`${overrideUrl}/admin/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(first.status, 400)
+    assert.equal(first.headers.get('ratelimit-limit'), '1')
+
+    const second = await fetch(`${overrideUrl}/admin/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(second.status, 429)
+  } finally {
+    await new Promise((resolve) => overrideServer.close(resolve))
+  }
+})
+
 for (const path of ['/login', '/admin/login', '/register']) {
   test(`POST ${path} is blocked with 429 after ${AUTH_RATE_LIMIT_OPTIONS.limit} requests`, async () => {
     for (let i = 0; i < AUTH_RATE_LIMIT_OPTIONS.limit; i++) {

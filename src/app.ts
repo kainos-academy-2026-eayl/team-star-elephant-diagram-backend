@@ -69,7 +69,7 @@ export function createApp({
 		res.json({ status: 'UP', time: new Date().toISOString() });
 	});
 	const userService = new UserService(userRepository);
-	const adminService = new AdminUserService(adminRepository);
+	const adminService = new AdminUserService(adminRepository, userRepository);
 	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
 
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
