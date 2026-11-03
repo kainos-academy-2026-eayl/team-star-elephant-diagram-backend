@@ -227,12 +227,13 @@ test('POST /basket requires a logged-in customer', async () => {
   assert.equal(admin.status, 401);
 });
 
-test('POST /basket adds items, sets a session cookie and accumulates quantity', async () => {
+test('POST /basket adds items and accumulates quantity', async () => {
+  const token = customerToken;
   const first = await addToBasket({ productId: '1', quantity: '2' });
   assert.equal(first.status, 200);
 
-  const second = await addToBasket({ productId: 1, quantity: 1 }, token);
-  await addToBasket({ productId: 3 }, token);
+  const second = await addToBasket({ productId: 1, quantity: 1 }, undefined, customerToken);
+  await addToBasket({ productId: 3 }, undefined, customerToken);
   assert.equal(second.status, 200);
 
   const response = await fetch(`${baseUrl}/basket`, { 

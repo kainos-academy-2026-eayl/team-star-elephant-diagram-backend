@@ -4,7 +4,6 @@ import { BasketQuantityError, type BasketService } from '../services/basketServi
 import { ProductNotFoundError } from '../services/productService';
 import type { TokenService } from '../services/tokenService';
 import { addToBasketSchema } from '../validators/basketSchema';
-import type { TokenService } from '../services/tokenService';
 
 function extractAccessToken(req: Request): string | undefined {
     const header = req.get('authorization') ?? '';
@@ -22,7 +21,7 @@ export function createBasketRouter(basketService: BasketService, tokens: TokenSe
             return null;
         }
 
-        const payload = await tokenService.verifyCustomerAccessToken(token);
+        const payload = await tokens.verifyCustomerAccessToken(token);
         if (!payload || typeof (payload as { userId?: unknown }).userId !== 'number') {
             res.status(401).json({ error: 'Invalid or expired token' });
             return null;
@@ -44,12 +43,8 @@ export function createBasketRouter(basketService: BasketService, tokens: TokenSe
     });
 
     router.post('/', async (req: Request, res: Response) => {
-        const header = req.get('authorization') ?? '';
-        const customer = header.startsWith('Bearer ') ? await tokens.verifyCustomerAccessToken(header.slice(7)) : null;
-        if (!customer) {
-            res.status(401).json({ error: 'Authentication required' });
-            return;
-        }
+        const userId = await requireCustomerAuth(req, res);
+        if (userId === null) return;
 
         const parsed = addToBasketSchema.safeParse(req.body ?? {});
         if (!parsed.success) {
