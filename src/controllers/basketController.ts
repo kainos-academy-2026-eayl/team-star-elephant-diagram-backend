@@ -3,6 +3,7 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { BasketQuantityError, type BasketService } from '../services/basketService';
 import { ProductNotFoundError } from '../services/productService';
+import type { TokenService } from '../services/tokenService';
 import { addToBasketSchema } from '../validators/basketSchema';
 
 const BASKET_COOKIE = 'basketId';
@@ -20,7 +21,7 @@ function readBasketId(req: Request): string | undefined {
     return undefined;
 }
 
-export function createBasketRouter(basketService: BasketService): Router {
+export function createBasketRouter(basketService: BasketService, tokens: TokenService): Router {
     const router = Router();
 
     router.get('/', async (req: Request, res: Response) => {
@@ -39,6 +40,13 @@ export function createBasketRouter(basketService: BasketService): Router {
     });
 
     router.post('/', async (req: Request, res: Response) => {
+        const header = req.get('authorization') ?? '';
+        const customer = header.startsWith('Bearer ') ? await tokens.verifyCustomerAccessToken(header.slice(7)) : null;
+        if (!customer) {
+            res.status(401).json({ error: 'Authentication required' });
+            return;
+        }
+
         const parsed = addToBasketSchema.safeParse(req.body ?? {});
         if (!parsed.success) {
             res.status(400).json({ error: 'Invalid basket item', details: z.flattenError(parsed.error).fieldErrors });

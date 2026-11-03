@@ -7,6 +7,7 @@ import prisma from '../src/prismaClient.ts';
 import { productRepository } from '../src/repositories/productRepository.ts';
 import './helpers/authEnvironment.mjs';
 import { ProductService } from '../src/services/productService.ts';
+import { TokenService } from '../src/services/tokenService.ts';
 
 const catalogue = [
   { productId: 1, name: 'CoreBook 14 Essential', category: 'Laptops', description: 'Laptop', price: 349.99, imageURL: 'https://example.com/1.jpg', inventory: { quantity: 5 } },
@@ -16,6 +17,13 @@ const catalogue = [
 
 process.env.JWT_SECRET = 'test-secret-key-at-least-32-characters-long-for-security'
 
+const tokens = new TokenService(
+  'admin-access-secret-at-least-32-bytes',
+  'refresh-secret-at-least-32-bytes-long',
+  process.env.JWT_SECRET,
+);
+let customerToken;
+
 let server;
 let baseUrl;
 let products;
@@ -23,7 +31,8 @@ let serviceError;
 let repositoryError;
 
 before(async () => {
-  const app = createApp({ productRepository: {
+  customerToken = await tokens.signAccess({ kind: 'customer', userId: 1, email: 'ada@example.com' });
+  const app = createApp({ tokenService: tokens, productRepository: {
     async findAll() {
       if (serviceError) throw serviceError;
       return products;
@@ -176,13 +185,30 @@ test('GET /products still returns the catalogue list', async () => {
   assert.equal((await response.json()).length, 3);
 });
 
-async function addToBasket(body, cookie) {
+async function addToBasket(body, cookie, token = customerToken) {
   return fetch(`${baseUrl}/basket`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(cookie ? { Cookie: cookie } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
+
+test('POST /basket requires a logged-in customer', async () => {
+  const anonymous = await addToBasket({ productId: 1, quantity: 1 }, undefined, null);
+  assert.equal(anonymous.status, 401);
+  assert.equal(anonymous.headers.get('set-cookie'), null);
+
+  const invalid = await addToBasket({ productId: 1, quantity: 1 }, undefined, 'not-a-token');
+  assert.equal(invalid.status, 401);
+
+  const adminToken = await tokens.signAccessToken({ adminId: 1, role: 'SuperAdmin' });
+  const admin = await addToBasket({ productId: 1, quantity: 1 }, undefined, adminToken);
+  assert.equal(admin.status, 401);
+});
 
 test('POST /basket adds items, sets a session cookie and accumulates quantity', async () => {
   const first = await addToBasket({ productId: '1', quantity: '2' });
