@@ -47,10 +47,13 @@ after(() => new Promise((resolve, reject) => {
   server.close((error) => error ? reject(error) : resolve());
 }));
 
-beforeEach(() => {
+beforeEach(async () => {
   products = [];
   serviceError = undefined;
   repositoryError = undefined;
+  // Clear baskets and basket items between tests to avoid cross-test pollution
+  await prisma.basketItem.deleteMany({});
+  await prisma.basket.deleteMany({});
 });
 
 test('the default product repository reads stored products in ID order', async (t) => {
