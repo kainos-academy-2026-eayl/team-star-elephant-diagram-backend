@@ -70,12 +70,13 @@ export function createApp({
 		res.json({ status: 'UP', time: new Date().toISOString() });
 	});
 	const userService = new UserService(userRepository);
-	const adminService = new AdminUserService(adminRepository, userRepository);
+	const basketService = new BasketService(productsRepository, basketRepository);
+	const adminService = new AdminUserService(adminRepository, userRepository, basketService);
 	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
 
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
-	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository), tokenService));
+	app.use('/basket', createBasketRouter(basketService, tokenService));
 	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));

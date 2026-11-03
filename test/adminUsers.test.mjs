@@ -68,6 +68,60 @@ const adminRepository = {
 	},
 };
 
+const products = new Map([
+	[1, { productId: 1, name: 'Green tea', price: 3.5, imageURL: '/tea.png' }],
+	[2, { productId: 2, name: 'Coffee beans', price: 39, imageURL: '/coffee.png' }],
+]);
+const productRepository = {
+	async findAll() {
+		return [...products.values()];
+	},
+	async findById(productId) {
+		return products.get(productId) ?? null;
+	},
+	async findByIds(productIds) {
+		return productIds.map((id) => products.get(id)).filter(Boolean);
+	},
+};
+
+// basketId -> { basketId, userId, createdAt, updatedAt, items: Map<productId, quantity> }
+const baskets = new Map();
+const toBasketRecord = (basket) => {
+	const { forename, surname, email } = users.get(basket.userId);
+	return { ...basket, customer: { forename, surname, email }, items: new Map(basket.items) };
+};
+const basketMatches = (basket, search) =>
+	(search ?? '')
+		.trim()
+		.split(/\s+/)
+		.filter(Boolean)
+		.every((term) => {
+			const user = users.get(basket.userId);
+			return (
+				(/^\d+$/.test(term) && Number(term) === basket.basketId) ||
+				[user.forename, user.surname, user.email].some((field) => field.toLowerCase().includes(term.toLowerCase()))
+			);
+		});
+const basketRepository = {
+	async getItems(userId) {
+		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
+		return new Map(basket?.items ?? []);
+	},
+	async addQuantity() {
+		throw new Error('not used by admin tests');
+	},
+	async list(search) {
+		return [...baskets.values()]
+			.filter((basket) => basketMatches(basket, search))
+			.sort((a, b) => b.updatedAt - a.updatedAt || b.basketId - a.basketId)
+			.map(toBasketRecord);
+	},
+	async findByBasketId(basketId) {
+		const basket = baskets.get(basketId);
+		return basket ? toBasketRecord(basket) : null;
+	},
+};
+
 let server;
 let url;
 let adminToken;
@@ -78,6 +132,8 @@ before(async () => {
 	server = createApp({
 		userRepository,
 		adminRepository,
+		productRepository,
+		basketRepository,
 		tokenService: tokens,
 		refreshSessionRepository: memoryRefreshSessions(),
 		authRateLimitOptions: { limit: 1000 },
@@ -116,6 +172,21 @@ beforeEach(() => {
 		{ userId: 1, orderId: 11, orderPlacedAt: new Date('2026-04-01T10:00:00Z'), orderStatus: 'PENDING', cost: '12.50' },
 		{ userId: 2, orderId: 12, orderPlacedAt: new Date('2026-04-02T10:00:00Z'), orderStatus: 'SHIPPED', cost: '5.00' },
 	);
+	baskets.clear();
+	baskets.set(123, {
+		basketId: 123,
+		userId: 2,
+		createdAt: new Date('2026-10-20T09:00:00Z'),
+		updatedAt: new Date('2026-10-25T12:00:00Z'),
+		items: new Map([[1, 2], [2, 2]]),
+	});
+	baskets.set(456, {
+		basketId: 456,
+		userId: 3,
+		createdAt: new Date('2026-10-21T09:00:00Z'),
+		updatedAt: new Date('2026-10-26T12:00:00Z'),
+		items: new Map([[1, 1]]),
+	});
 });
 
 const request = (method, path, token = adminToken) =>
@@ -327,4 +398,103 @@ test('admin user endpoints return 500 without leaking details on repository fail
 		userRepository.list = original;
 		console.error = originalError;
 	}
+});
+
+test('GET /admin/users/:id returns the customer\'s real basket', async () => {
+	const body = await (await get('/admin/users/2')).json();
+	assert.deepEqual(body.basket, {
+		itemCount: 4,
+		subtotal: 85,
+		items: [
+			{ productName: 'Green tea', quantity: 2 },
+			{ productName: 'Coffee beans', quantity: 2 },
+		],
+	});
+});
+
+test('GET /admin/baskets lists baskets by most recent activity with the frontend contract fields', async () => {
+	const response = await get('/admin/baskets');
+	assert.equal(response.status, 200);
+	assert.equal(response.headers.get('cache-control'), 'no-store');
+	assert.deepEqual(await response.json(), {
+		baskets: [
+			{
+				basketId: 456,
+				customerName: 'Alan Turing',
+				customerEmail: 'alan.t@example.org',
+				itemCount: 1,
+				total: '£3.50',
+				lastActivity: '2026-10-26',
+				status: 'Active',
+			},
+			{
+				basketId: 123,
+				customerName: 'Grace Hopper',
+				customerEmail: 'grace@example.com',
+				itemCount: 4,
+				total: '£85.00',
+				lastActivity: '2026-10-25',
+				status: 'Active',
+			},
+		],
+	});
+});
+
+test('GET /admin/baskets searches by basket ID, customer name and email', async () => {
+	const search = async (query) => {
+		const response = await get(`/admin/baskets?${query}`);
+		assert.equal(response.status, 200, query);
+		return (await response.json()).baskets.map((basket) => basket.basketId);
+	};
+	assert.deepEqual(await search('search=123'), [123]);
+	assert.deepEqual(await search('search=grace'), [123]);
+	assert.deepEqual(await search('search=ALAN%20TURING'), [456]);
+	assert.deepEqual(await search('search=example.org'), [456]);
+	assert.deepEqual(await search('q=hopper'), [123]);
+	assert.deepEqual(await search('search=%20%20'), [456, 123]);
+	assert.deepEqual(await search('search=nobody'), []);
+	assert.equal((await get(`/admin/baskets?search=${'a'.repeat(101)}`)).status, 400);
+});
+
+test('GET /admin/baskets/:id returns basket, customer and priced items', async () => {
+	const response = await get('/admin/baskets/123');
+	assert.equal(response.status, 200);
+	assert.equal(response.headers.get('cache-control'), 'no-store');
+	assert.deepEqual(await response.json(), {
+		basket: {
+			basketId: 123,
+			createdAt: '2026-10-20',
+			lastActivity: '2026-10-25',
+			status: 'Active',
+			customer: { name: 'Grace Hopper', email: 'grace@example.com' },
+			items: [
+				{ productName: 'Green tea', quantity: 2, unitPrice: '£3.50', totalPrice: '£7.00' },
+				{ productName: 'Coffee beans', quantity: 2, unitPrice: '£39.00', totalPrice: '£78.00' },
+			],
+			itemCount: 4,
+			total: '£85.00',
+		},
+	});
+});
+
+test('GET /admin/baskets/:id returns 404 for unknown or malformed ids', async () => {
+	for (const id of ['999', '0', '-1', 'abc', '1.5', '0x1', '1e1', '99999999999']) {
+		const response = await get(`/admin/baskets/${id}`);
+		assert.equal(response.status, 404, id);
+		assert.deepEqual(await response.json(), { error: 'Basket not found' });
+	}
+});
+
+test('admin basket endpoints require a live admin access token', async () => {
+	const customerToken = await tokens.signAccess({ kind: 'customer', userId: 1, email: 'ada@example.com' });
+	for (const token of [undefined, 'not-a-jwt', customerToken]) {
+		for (const path of ['/admin/baskets', '/admin/baskets/123']) {
+			const response = await get(path, token ?? '');
+			assert.equal(response.status, 401, `${path} with ${token}`);
+			assert.deepEqual(await response.json(), { error: 'Authentication required' });
+		}
+	}
+	admins.delete(1);
+	for (const path of ['/admin/baskets', '/admin/baskets/123'])
+		assert.equal((await get(path)).status, 401, `${path} for deleted admin`);
 });

@@ -33,6 +33,14 @@ const userListQuerySchema = z.object({
 	page: z.coerce.number().int().positive().max(100_000).optional(),
 });
 
+// Accepts `search` (consistent with /admin/users) or `q` (the frontend's form field name).
+const basketListQuerySchema = z
+	.object({
+		search: z.string().trim().max(100).optional(),
+		q: z.string().trim().max(100).optional(),
+	})
+	.transform(({ search, q }) => ({ search: search || q || undefined }));
+
 export function adminController(
 	adminService: AdminUserService,
 	tokens: TokenService,
@@ -226,6 +234,50 @@ export function adminController(
 			},
 		);
 	}
+
+	router.get(
+		'/admin/baskets',
+		adminRateLimit,
+		requireAdmin(tokens),
+		requireCurrentAdmin,
+		async (req: Request, res: Response) => {
+			const query = basketListQuerySchema.safeParse(req.query);
+			if (!query.success) {
+				res.status(400).json({
+					error: 'Invalid basket search',
+					details: z.flattenError(query.error).fieldErrors,
+				});
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(await adminService.listBaskets(query.data.search));
+			} catch (error) {
+				console.error('Admin basket list failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.get(
+		'/admin/baskets/:id',
+		adminRateLimit,
+		requireAdmin(tokens),
+		requireCurrentAdmin,
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			try {
+				const details = basketId.success ? await adminService.getBasketDetails(basketId.data) : null;
+				if (!details) {
+					res.status(404).json({ error: 'Basket not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json(details);
+			} catch (error) {
+				console.error('Admin basket lookup failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
 
 	return router;
 }

@@ -157,9 +157,11 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | `GET /admin/me` | Requires an admin access token in the header. |
 | `GET /admin` | Returns authenticated staff identity; dashboard metrics are not implemented. |
 | `GET /admin/users?search=&page=` | Admin only. Lists customers (20 per page, newest first); `search` matches name or email, case-insensitive. |
-| `GET /admin/users/:id` | Admin only. Customer summary, 5 most recent orders, and basket summary (always empty until baskets are persisted). |
+| `GET /admin/users/:id` | Admin only. Customer summary, 5 most recent orders, and the customer's current basket summary. |
 | `POST /admin/users/:id/suspend` | Admin only. Sets the customer to `suspended`; suspended customers get the normal invalid-credentials response at `POST /login`. |
 | `POST /admin/users/:id/reactivate` | Admin only. Sets the customer back to `active`. |
+| `GET /admin/baskets?search=` | Admin only. Lists customer baskets, most recent activity first; `search` (or `q`) matches basket ID, customer name or email, case-insensitive. |
+| `GET /admin/baskets/:id` | Admin only. Basket details with customer, priced items and total; 404 for unknown IDs. |
 
 `POST /admin/logout` remains a compatibility alias. The refresh endpoint is
 `/auth/refresh`, not `/admin/refresh`. Customer order history is not implemented;
