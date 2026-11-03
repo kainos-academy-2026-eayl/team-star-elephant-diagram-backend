@@ -5,7 +5,7 @@ import nunjucks from 'nunjucks';
 import { join } from 'node:path';
 import { createBasketRouter } from './controllers/basketController';
 import { createProductRouter } from './controllers/productController';
-import { createInMemoryBasketRepository, type BasketRepository } from './repositories/basketRepository';
+import { createDatabaseBasketRepository, type BasketRepository } from './repositories/basketRepository';
 import { productRepository, type ProductRepository } from './repositories/productRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
 import { prismaAdminUserRepository, type adminRepository } from './repositories/adminRepository';
@@ -22,6 +22,7 @@ import { prismaRefreshSessionRepository, type RefreshSessionRepository } from '.
 import { prismaPasswordResetRepository, type PasswordResetRepository } from './repositories/passwordResetRepository';
 import { createConsoleResetDelivery, PasswordResetService, type PasswordResetDelivery } from './services/passwordResetService';
 import { passwordResetController } from './controllers/passwordResetController';
+import prisma from './prismaClient';
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
@@ -38,7 +39,7 @@ export interface AppDependencies {
 
 export function createApp({
 	productRepository: productsRepository = productRepository,
-	basketRepository = createInMemoryBasketRepository(),
+	basketRepository = createDatabaseBasketRepository(prisma),
 	userRepository = prismaUserRepository,
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
@@ -74,7 +75,7 @@ export function createApp({
 
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
 	app.use('/products', createProductRouter(new ProductService(productsRepository)));
-	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository)));
+	app.use('/basket', createBasketRouter(new BasketService(productsRepository, basketRepository), tokenService));
 	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));

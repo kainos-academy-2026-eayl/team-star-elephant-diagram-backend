@@ -7,6 +7,7 @@ export interface BasketItem {
 }
 
 export interface Basket {
+    userId: number;
     items: BasketItem[];
     subtotal: number;
 }

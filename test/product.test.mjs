@@ -6,6 +6,7 @@ import { createApp } from '../src/app.ts';
 import prisma from '../src/prismaClient.ts';
 import { productRepository } from '../src/repositories/productRepository.ts';
 import './helpers/authEnvironment.mjs';
+import { generateCustomerAccessToken } from './helpers/tokenGenerator.mjs';
 import { ProductService } from '../src/services/productService.ts';
 
 const catalogue = [
@@ -21,6 +22,21 @@ let baseUrl;
 let products;
 let serviceError;
 let repositoryError;
+let baskets;
+
+const basketRepository = {
+  async getItems(basketId) {
+    return baskets.get(basketId) ?? new Map();
+  },
+  async addQuantity(basketId, productId, quantity, maxQuantity) {
+    const items = baskets.get(basketId) ?? new Map();
+    const newQuantity = (items.get(productId) ?? 0) + quantity;
+    if (newQuantity > maxQuantity) return false;
+    items.set(productId, newQuantity);
+    baskets.set(basketId, items);
+    return true;
+  },
+};
 
 before(async () => {
   const app = createApp({ productRepository: {
@@ -36,7 +52,7 @@ before(async () => {
       if (repositoryError) throw repositoryError;
       return catalogue.filter((product) => ids.includes(product.productId));
     },
-  } });
+  }, basketRepository });
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -50,6 +66,7 @@ beforeEach(() => {
   products = [];
   serviceError = undefined;
   repositoryError = undefined;
+  baskets = new Map();
 });
 
 test('the default product repository reads stored products in ID order', async (t) => {
@@ -176,57 +193,63 @@ test('GET /products still returns the catalogue list', async () => {
   assert.equal((await response.json()).length, 3);
 });
 
-async function addToBasket(body, cookie) {
+async function addToBasket(body, token) {
   return fetch(`${baseUrl}/basket`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+    headers: { 
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
     body: JSON.stringify(body),
   });
 }
 
-test('POST /basket adds items, sets a session cookie and accumulates quantity', async () => {
-  const first = await addToBasket({ productId: '1', quantity: '2' });
+test('POST /basket adds items and accumulates quantity', async () => {
+  const token = await generateCustomerAccessToken(1, 'test@example.com');
+  const first = await addToBasket({ productId: '1', quantity: '2' }, token);
   assert.equal(first.status, 200);
-  const setCookie = first.headers.get('set-cookie');
-  assert.match(setCookie, /basketId=[0-9a-f-]{36}/);
-  assert.match(setCookie, /HttpOnly/);
-  const cookie = setCookie.split(';')[0];
 
-  const second = await addToBasket({ productId: 1, quantity: 1 }, cookie);
-  await addToBasket({ productId: 3 }, cookie);
+  const second = await addToBasket({ productId: 1, quantity: 1 }, token);
+  await addToBasket({ productId: 3 }, token);
   assert.equal(second.status, 200);
 
-  const response = await fetch(`${baseUrl}/basket`, { headers: { Cookie: cookie } });
+  const response = await fetch(`${baseUrl}/basket`, { 
+    headers: { Authorization: `Bearer ${token}` }
+  });
   assert.deepEqual(await response.json(), {
     items: [
       { productId: 1, productName: 'CoreBook 14 Essential', quantity: 3, unitPrice: 349.99, imageURL: 'https://example.com/1.jpg' },
       { productId: 3, productName: 'AirLite 13 Ultrabook', quantity: 1, unitPrice: 849.99, imageURL: 'https://example.com/3.jpg' },
     ],
     subtotal: 1899.96,
+    userId: 1,
   });
 });
 
 test('POST /basket returns 404 for an unknown product', async () => {
-  const response = await addToBasket({ productId: 999, quantity: 1 });
+  const token = await generateCustomerAccessToken(1, 'test@example.com');
+  const response = await addToBasket({ productId: 999, quantity: 1 }, token);
   assert.equal(response.status, 404);
-  assert.equal(response.headers.get('set-cookie'), null);
 });
 
 test('POST /basket rejects invalid quantities', async () => {
+  const token = await generateCustomerAccessToken(1, 'test@example.com');
   for (const quantity of [0, -1, 1.5, 100, 'abc']) {
-    const response = await addToBasket({ productId: 1, quantity });
+    const response = await addToBasket({ productId: 1, quantity }, token);
     assert.equal(response.status, 400, String(quantity));
   }
 });
 
 test('POST /basket rejects quantities that exceed the per-item limit when combined', async () => {
-  const first = await addToBasket({ productId: 2, quantity: 99 });
-  const cookie = first.headers.get('set-cookie').split(';')[0];
-  const response = await addToBasket({ productId: 2, quantity: 1 }, cookie);
+  const token = await generateCustomerAccessToken(1, 'test@example.com');
+  const first = await addToBasket({ productId: 1, quantity: 50 }, token);
+  assert.equal(first.status, 200);
+  const response = await addToBasket({ productId: 1, quantity: 50 }, token);
   assert.equal(response.status, 400);
 });
 
-test('GET /basket returns an empty basket without a session', async () => {
+test('GET /basket returns 401 without authentication', async () => {
   const response = await fetch(`${baseUrl}/basket`);
-  assert.deepEqual(await response.json(), { items: [], subtotal: 0 });
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: 'Authentication required' });
 });

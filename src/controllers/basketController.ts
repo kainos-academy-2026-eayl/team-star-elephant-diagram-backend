@@ -1,37 +1,41 @@
-import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { BasketQuantityError, type BasketService } from '../services/basketService';
 import { ProductNotFoundError } from '../services/productService';
 import { addToBasketSchema } from '../validators/basketSchema';
+import type { TokenService } from '../services/tokenService';
 
-const BASKET_COOKIE = 'basketId';
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function readBasketId(req: Request): string | undefined {
-    const header = req.get('cookie') ?? '';
-    for (const part of header.split(';')) {
-        const [name, ...rest] = part.trim().split('=');
-        if (name === BASKET_COOKIE) {
-            const value = rest.join('=');
-            return UUID_PATTERN.test(value) ? value : undefined;
-        }
-    }
-    return undefined;
+function extractAccessToken(req: Request): string | undefined {
+    const header = req.get('authorization') ?? '';
+    const match = header.match(/^Bearer\s+(.+)$/);
+    return match?.[1];
 }
 
-export function createBasketRouter(basketService: BasketService): Router {
+export function createBasketRouter(basketService: BasketService, tokenService: TokenService): Router {
     const router = Router();
 
-    router.get('/', async (req: Request, res: Response) => {
-        const basketId = readBasketId(req);
-        if (!basketId) {
-            res.status(200).json({ items: [], subtotal: 0 });
-            return;
+    async function requireCustomerAuth(req: Request, res: Response): Promise<number | null> {
+        const token = extractAccessToken(req);
+        if (!token) {
+            res.status(401).json({ error: 'Authentication required' });
+            return null;
         }
 
+        const payload = await tokenService.verifyCustomerAccessToken(token);
+        if (!payload || typeof (payload as { userId?: unknown }).userId !== 'number') {
+            res.status(401).json({ error: 'Invalid or expired token' });
+            return null;
+        }
+
+        return (payload as { userId: number }).userId;
+    }
+
+    router.get('/', async (req: Request, res: Response) => {
+        const userId = await requireCustomerAuth(req, res);
+        if (userId === null) return;
+
         try {
-            res.status(200).json(await basketService.getBasket(basketId));
+            res.status(200).json(await basketService.getBasket(userId));
         } catch (error) {
             console.error('Basket retrieval failed.', error);
             res.status(500).json({ error: 'Internal server error' });
@@ -39,25 +43,17 @@ export function createBasketRouter(basketService: BasketService): Router {
     });
 
     router.post('/', async (req: Request, res: Response) => {
+        const userId = await requireCustomerAuth(req, res);
+        if (userId === null) return;
+
         const parsed = addToBasketSchema.safeParse(req.body ?? {});
         if (!parsed.success) {
             res.status(400).json({ error: 'Invalid basket item', details: z.flattenError(parsed.error).fieldErrors });
             return;
         }
 
-        const existingId = readBasketId(req);
-        const basketId = existingId ?? randomUUID();
-
         try {
-            const basket = await basketService.addItem(basketId, parsed.data.productId, parsed.data.quantity);
-            if (!existingId) {
-                res.cookie(BASKET_COOKIE, basketId, {
-                    httpOnly: true,
-                    sameSite: 'lax',
-                    secure: process.env.NODE_ENV === 'production',
-                    maxAge: 7 * 24 * 60 * 60 * 1000,
-                });
-            }
+            const basket = await basketService.addItem(userId, parsed.data.productId, parsed.data.quantity);
             res.status(200).json(basket);
         } catch (error) {
             if (error instanceof ProductNotFoundError) {

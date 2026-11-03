@@ -43,6 +43,7 @@ model User {
   status         UserStatus      @default(ACTIVE)
   orders         Order[]
   paymentDetails PaymentDetail[]
+  basket        Basket?
 }
 
 model Product {
@@ -56,6 +57,7 @@ model Product {
   imageURL    String            @map("image") @db.VarChar(255)
   suppliers   ProductSupplier[]
   inventory   Inventory[]
+  basketItems BasketItem[]
   orderItems  OrderItem[]
 
   @@index([name])
@@ -145,4 +147,25 @@ model PaymentDetail {
   expirationDate String        @map("expiration_date") @db.VarChar(7)
   user           User          @relation(fields: [userId], references: [userId])
   userId     Int
+}
+
+model Basket {
+  basketId  Int       @id @unique @default(autoincrement()) @map("basket_id")
+  userId    Int       @unique
+  user      User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  items     BasketItem[]
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
+}
+
+model BasketItem {
+  basketItemId Int    @id @unique @default(autoincrement()) @map("basket_item_id")
+  basketId     Int
+  basket       Basket @relation(fields: [basketId], references: [basketId], onDelete: Cascade)
+  productId    Int
+  product      Product @relation(fields: [productId], references: [productId])
+  quantity     Int
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([basketId, productId])
 }
