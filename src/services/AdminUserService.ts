@@ -1,6 +1,9 @@
 import argon2 from 'argon2';
 import { DASHBOARD_BY_ROLE, isAdminRole, type AdminRole } from '../models/adminRoles';
 import type {
+	AdminBasketDetailsResponse,
+	AdminBasketListResponse,
+	AdminBasketSummary,
 	AdminUserDetailsResponse,
 	AdminUserListResponse,
 	AdminUserStatusResponse,
@@ -9,9 +12,11 @@ import type {
 import type { UserStatus } from '../models/user';
 import type { adminRepository } from '../repositories/adminRepository';
 import type { UserRepository, UserSummaryRecord } from '../repositories/userRepository';
+import type { BasketService, PricedBasketRecord } from './basketService';
 import type { LoginRequest } from '../validators/loginSchema';
 
 const ADMIN_USERS_PAGE_SIZE = 20;
+const ADMIN_BASKETS_PAGE_SIZE = 20;
 const ADMIN_USER_RECENT_ORDERS = 5;
 
 export class InvalidCredentialsError extends Error {
@@ -56,10 +61,26 @@ const toUserSummary = (user: UserSummaryRecord): AdminUserSummary => ({
 	status: toAdminStatus(user.status),
 });
 
+const gbp = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' });
+const formatPrice = (amount: number) => gbp.format(amount);
+const formatDate = (date: Date) => date.toISOString().slice(0, 10);
+const basketStatus = (basket: PricedBasketRecord) => (basket.itemCount > 0 ? 'Active' : 'Empty');
+
+const toBasketSummary = (basket: PricedBasketRecord): AdminBasketSummary => ({
+	basketId: basket.basketId,
+	customerName: `${basket.customer.forename} ${basket.customer.surname}`,
+	customerEmail: basket.customer.email,
+	itemCount: basket.itemCount,
+	total: formatPrice(basket.subtotal),
+	lastActivity: formatDate(basket.updatedAt),
+	status: basketStatus(basket),
+});
+
 export class AdminUserService {
 	constructor(
 		private readonly admins: adminRepository,
 		private readonly users: UserRepository,
+		private readonly baskets: BasketService,
 	) {}
 
 	async login(data: LoginRequest): Promise<AuthenticatedAdmin> {
@@ -128,6 +149,7 @@ export class AdminUserService {
 		const user = await this.users.findById(userId);
 		if (!user) return null;
 		const orders = await this.users.findRecentOrders(userId, ADMIN_USER_RECENT_ORDERS);
+		const basket = await this.baskets.getBasket(userId);
 		return {
 			user: toUserSummary(user),
 			recentOrders: orders.map((order) => ({
@@ -136,8 +158,47 @@ export class AdminUserService {
 				status: order.orderStatus.toLowerCase(),
 				total: Number(order.cost.toString()),
 			})),
-			// Baskets are session-scoped and not linked to customers yet (KAN-112), so none can be shown.
-			basket: { itemCount: 0, subtotal: 0, items: [] },
+			basket: {
+				itemCount: basket.items.reduce((count, item) => count + item.quantity, 0),
+				subtotal: basket.subtotal,
+				items: basket.items.map(({ productName, quantity }) => ({ productName, quantity })),
+			},
+		};
+	}
+
+	async listBaskets(search: string | undefined, page = 1): Promise<AdminBasketListResponse> {
+		const { baskets, total } = await this.baskets.listBaskets(search, page);
+		return {
+			baskets: baskets.map(toBasketSummary),
+			pagination: {
+				page,
+				pageSize: ADMIN_BASKETS_PAGE_SIZE,
+				totalPages: Math.max(1, Math.ceil(total / ADMIN_BASKETS_PAGE_SIZE)),
+				totalBaskets: total,
+			},
+		};
+	}
+
+	async getBasketDetails(basketId: number): Promise<AdminBasketDetailsResponse | null> {
+		const basket = await this.baskets.getBasketById(basketId);
+		if (!basket) return null;
+		const summary = toBasketSummary(basket);
+		return {
+			basket: {
+				basketId: summary.basketId,
+				createdAt: formatDate(basket.createdAt),
+				lastActivity: summary.lastActivity,
+				status: summary.status,
+				customer: { name: summary.customerName, email: summary.customerEmail },
+				items: basket.items.map((item) => ({
+					productName: item.productName,
+					quantity: item.quantity,
+					unitPrice: formatPrice(item.unitPrice),
+					totalPrice: formatPrice(Math.round(item.unitPrice * item.quantity * 100) / 100),
+				})),
+				itemCount: summary.itemCount,
+				total: summary.total,
+			},
 		};
 	}
 

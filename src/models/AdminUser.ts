@@ -34,3 +34,32 @@ export interface AdminUserDetailsResponse {
 export interface AdminUserStatusResponse {
     user: Pick<AdminUserSummary, 'id' | 'status'>;
 }
+
+// Admin basket API response shapes; must match frontend src/models/adminBasket.ts.
+export interface AdminBasketSummary {
+    basketId: number;
+    customerName: string;
+    customerEmail: string;
+    itemCount: number;
+    total: string;
+    lastActivity: string;
+    status: string;
+}
+
+export interface AdminBasketListResponse {
+    baskets: AdminBasketSummary[];
+    pagination: { page: number; pageSize: number; totalPages: number; totalBaskets: number };
+}
+
+export interface AdminBasketDetailsResponse {
+    basket: {
+        basketId: number;
+        createdAt: string;
+        lastActivity: string;
+        status: string;
+        customer: { name: string; email: string };
+        items: Array<{ productName: string; quantity: number; unitPrice: string; totalPrice: string }>;
+        itemCount: number;
+        total: string;
+    };
+}
