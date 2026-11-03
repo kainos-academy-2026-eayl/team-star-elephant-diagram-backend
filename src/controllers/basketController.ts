@@ -2,8 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { BasketQuantityError, type BasketService } from '../services/basketService';
 import { ProductNotFoundError } from '../services/productService';
-import { addToBasketSchema } from '../validators/basketSchema';
 import type { TokenService } from '../services/tokenService';
+import { addToBasketSchema } from '../validators/basketSchema';
 
 function extractAccessToken(req: Request): string | undefined {
     const header = req.get('authorization') ?? '';
@@ -11,7 +11,7 @@ function extractAccessToken(req: Request): string | undefined {
     return match?.[1];
 }
 
-export function createBasketRouter(basketService: BasketService, tokenService: TokenService): Router {
+export function createBasketRouter(basketService: BasketService, tokens: TokenService): Router {
     const router = Router();
 
     async function requireCustomerAuth(req: Request, res: Response): Promise<number | null> {
@@ -21,7 +21,7 @@ export function createBasketRouter(basketService: BasketService, tokenService: T
             return null;
         }
 
-        const payload = await tokenService.verifyCustomerAccessToken(token);
+        const payload = await tokens.verifyCustomerAccessToken(token);
         if (!payload || typeof (payload as { userId?: unknown }).userId !== 'number') {
             res.status(401).json({ error: 'Invalid or expired token' });
             return null;
