@@ -40,10 +40,11 @@ export class BasketService {
         return { userId, items, subtotal };
     }
 
-    async listBaskets(search?: string): Promise<PricedBasketRecord[]> {
-        const records = await this.baskets.list(search);
+    async listBaskets(search: string | undefined, page: number): Promise<{ baskets: PricedBasketRecord[]; total: number }> {
+        const pageSize = 20;
+        const { baskets: records, total } = await this.baskets.list(search, (page - 1) * pageSize, pageSize);
         const products = await this.loadProducts(records.map((record) => record.items));
-        return records.map((record) => this.priceRecord(record, products));
+        return { baskets: records.map((record) => this.priceRecord(record, products)), total };
     }
 
     async getBasketById(basketId: number): Promise<PricedBasketRecord | null> {

@@ -38,8 +38,9 @@ const basketListQuerySchema = z
 	.object({
 		search: z.string().trim().max(100).optional(),
 		q: z.string().trim().max(100).optional(),
+		page: z.coerce.number().int().positive().max(100_000).optional(),
 	})
-	.transform(({ search, q }) => ({ search: search || q || undefined }));
+	.transform(({ search, q, page }) => ({ search: search || q || undefined, page }));
 
 export function adminController(
 	adminService: AdminUserService,
@@ -250,7 +251,7 @@ export function adminController(
 				return;
 			}
 			try {
-				res.set('Cache-Control', 'no-store').json(await adminService.listBaskets(query.data.search));
+				res.set('Cache-Control', 'no-store').json(await adminService.listBaskets(query.data.search, query.data.page));
 			} catch (error) {
 				console.error('Admin basket list failed', error);
 				res.status(500).json({ error: 'Internal server error' });

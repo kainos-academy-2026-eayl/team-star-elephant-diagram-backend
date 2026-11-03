@@ -16,6 +16,7 @@ import type { BasketService, PricedBasketRecord } from './basketService';
 import type { LoginRequest } from '../validators/loginSchema';
 
 const ADMIN_USERS_PAGE_SIZE = 20;
+const ADMIN_BASKETS_PAGE_SIZE = 20;
 const ADMIN_USER_RECENT_ORDERS = 5;
 
 export class InvalidCredentialsError extends Error {
@@ -165,9 +166,17 @@ export class AdminUserService {
 		};
 	}
 
-	async listBaskets(search?: string): Promise<AdminBasketListResponse> {
-		const baskets = await this.baskets.listBaskets(search);
-		return { baskets: baskets.map(toBasketSummary) };
+	async listBaskets(search: string | undefined, page = 1): Promise<AdminBasketListResponse> {
+		const { baskets, total } = await this.baskets.listBaskets(search, page);
+		return {
+			baskets: baskets.map(toBasketSummary),
+			pagination: {
+				page,
+				pageSize: ADMIN_BASKETS_PAGE_SIZE,
+				totalPages: Math.max(1, Math.ceil(total / ADMIN_BASKETS_PAGE_SIZE)),
+				totalBaskets: total,
+			},
+		};
 	}
 
 	async getBasketDetails(basketId: number): Promise<AdminBasketDetailsResponse | null> {

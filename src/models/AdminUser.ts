@@ -48,6 +48,7 @@ export interface AdminBasketSummary {
 
 export interface AdminBasketListResponse {
     baskets: AdminBasketSummary[];
+    pagination: { page: number; pageSize: number; totalPages: number; totalBaskets: number };
 }
 
 export interface AdminBasketDetailsResponse {

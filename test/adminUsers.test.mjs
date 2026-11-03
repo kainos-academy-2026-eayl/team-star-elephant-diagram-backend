@@ -110,11 +110,11 @@ const basketRepository = {
 	async addQuantity() {
 		throw new Error('not used by admin tests');
 	},
-	async list(search) {
-		return [...baskets.values()]
+	async list(search, skip, take) {
+		const matching = [...baskets.values()]
 			.filter((basket) => basketMatches(basket, search))
-			.sort((a, b) => b.updatedAt - a.updatedAt || b.basketId - a.basketId)
-			.map(toBasketRecord);
+			.sort((a, b) => b.updatedAt - a.updatedAt || b.basketId - a.basketId);
+		return { baskets: matching.slice(skip, skip + take).map(toBasketRecord), total: matching.length };
 	},
 	async findByBasketId(basketId) {
 		const basket = baskets.get(basketId);
@@ -437,7 +437,29 @@ test('GET /admin/baskets lists baskets by most recent activity with the frontend
 				status: 'Active',
 			},
 		],
+		pagination: { page: 1, pageSize: 20, totalPages: 1, totalBaskets: 2 },
 	});
+});
+
+test('GET /admin/baskets paginates results before returning basket records', async () => {
+	for (let basketId = 1000; basketId < 1021; basketId += 1) {
+		baskets.set(basketId, {
+			basketId,
+			userId: 1,
+			createdAt: new Date('2026-10-20T09:00:00Z'),
+			updatedAt: new Date(`2026-10-${String(27 + (basketId % 4)).padStart(2, '0')}T12:00:00Z`),
+			items: new Map(),
+		});
+	}
+
+	const first = await (await get('/admin/baskets')).json();
+	assert.equal(first.baskets.length, 20);
+	assert.deepEqual(first.pagination, { page: 1, pageSize: 20, totalPages: 2, totalBaskets: 23 });
+
+	const second = await (await get('/admin/baskets?page=2')).json();
+	assert.equal(second.baskets.length, 3);
+	assert.deepEqual(second.pagination, { page: 2, pageSize: 20, totalPages: 2, totalBaskets: 23 });
+	assert.equal((await get('/admin/baskets?page=0')).status, 400);
 });
 
 test('GET /admin/baskets searches by basket ID, customer name and email', async () => {
@@ -447,6 +469,15 @@ test('GET /admin/baskets searches by basket ID, customer name and email', async 
 		return (await response.json()).baskets.map((basket) => basket.basketId);
 	};
 	assert.deepEqual(await search('search=123'), [123]);
+	baskets.set(1_000_000_000, {
+		basketId: 1_000_000_000,
+		userId: 1,
+		createdAt: new Date('2026-10-20T09:00:00Z'),
+		updatedAt: new Date('2026-10-27T12:00:00Z'),
+		items: new Map(),
+	});
+	assert.deepEqual(await search('search=1000000000'), [1_000_000_000]);
+	baskets.delete(1_000_000_000);
 	assert.deepEqual(await search('search=grace'), [123]);
 	assert.deepEqual(await search('search=ALAN%20TURING'), [456]);
 	assert.deepEqual(await search('search=example.org'), [456]);
