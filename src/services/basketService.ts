@@ -12,23 +12,23 @@ export class BasketService {
         private readonly baskets: BasketRepository,
     ) { }
 
-    async addItem(basketId: string, productId: number, quantity: number): Promise<Basket> {
+    async addItem(userId: number, productId: number, quantity: number): Promise<Basket> {
         const product = await this.products.findById(productId);
         if (!product) {
             throw new ProductNotFoundError(productId);
         }
 
-        const quantityAdded = await this.baskets.addQuantity(basketId, productId, quantity, MAX_ITEM_QUANTITY);
+        const quantityAdded = await this.baskets.addQuantity(String(userId), productId, quantity, MAX_ITEM_QUANTITY);
         if (!quantityAdded) {
             throw new BasketQuantityError(`Quantity cannot exceed ${MAX_ITEM_QUANTITY}`);
         }
 
-        return this.getBasket(basketId);
+        return this.getBasket(userId);
     }
 
-    async getBasket(basketId: string): Promise<Basket> {
+    async getBasket(userId: number): Promise<Basket> {
         const items: BasketItem[] = [];
-        const quantities = await this.baskets.getItems(basketId);
+        const quantities = await this.baskets.getItems(String(userId));
         // Prices are re-read from the database so the basket always reflects current values.
         const products = await this.products.findByIds([...quantities.keys()]);
         const productsById = new Map(products.map((product) => [product.productId, product]));
@@ -46,6 +46,6 @@ export class BasketService {
         }
 
         const subtotal = Math.round(items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100) / 100;
-        return { items, subtotal };
+        return { userId, items, subtotal };
     }
 }

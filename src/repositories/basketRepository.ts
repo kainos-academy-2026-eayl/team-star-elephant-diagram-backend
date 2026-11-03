@@ -1,75 +1,89 @@
+import type { PrismaClient } from '@prisma/client';
+
 export interface BasketRepository {
     // Returns productId -> quantity for the basket.
     getItems(basketId: string): Promise<ReadonlyMap<number, number>>;
     addQuantity(basketId: string, productId: number, quantity: number, maxQuantity: number): Promise<boolean>;
 }
 
-// Session-scoped baskets held in memory; contents are lost on restart.
-export function createInMemoryBasketRepository({
-    maxBaskets = 10_000,
-    ttlMs = 7 * 24 * 60 * 60 * 1000,
-    now = Date.now,
-}: {
-    maxBaskets?: number;
-    ttlMs?: number;
-    now?: () => number;
-} = {}): BasketRepository {
-    if (!Number.isSafeInteger(maxBaskets) || maxBaskets < 1) {
-        throw new RangeError('maxBaskets must be a positive safe integer');
-    }
-    if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
-        throw new RangeError('ttlMs must be a positive finite number');
-    }
-
-    const baskets = new Map<string, { items: Map<number, number>; expiresAt: number }>();
-
-    function removeExpiredBaskets(currentTime: number): void {
-        for (const [basketId, basket] of baskets) {
-            if (basket.expiresAt <= currentTime) {
-                baskets.delete(basketId);
-            }
-        }
-    }
-
-    function evictOldestBasket(): void {
-        let oldestBasketId: string | undefined;
-        let oldestExpiration = Number.POSITIVE_INFINITY;
-        for (const [basketId, basket] of baskets) {
-            if (basket.expiresAt < oldestExpiration) {
-                oldestBasketId = basketId;
-                oldestExpiration = basket.expiresAt;
-            }
-        }
-        if (oldestBasketId !== undefined) {
-            baskets.delete(oldestBasketId);
-        }
-    }
-
+// Database-backed baskets using Prisma.
+export function createDatabaseBasketRepository(prisma: PrismaClient): BasketRepository {
     return {
         async getItems(basketId) {
-            const currentTime = now();
-            removeExpiredBaskets(currentTime);
-            return new Map(baskets.get(basketId)?.items);
+            const userId = parseInt(basketId, 10);
+            if (!Number.isSafeInteger(userId) || userId <= 0) {
+                return new Map();
+            }
+
+            const basketItems = await prisma.basketItem.findMany({
+                where: {
+                    basket: {
+                        userId,
+                    },
+                },
+            });
+
+            const items = new Map<number, number>();
+            for (const item of basketItems) {
+                items.set(item.productId, item.quantity);
+            }
+            return items;
         },
 
         async addQuantity(basketId, productId, quantity, maxQuantity) {
-            const currentTime = now();
-            removeExpiredBaskets(currentTime);
-            const basket = baskets.get(basketId);
-            const items = basket?.items ?? new Map<number, number>();
-            const newQuantity = (items.get(productId) ?? 0) + quantity;
+            const userId = parseInt(basketId, 10);
+            if (!Number.isSafeInteger(userId) || userId <= 0) {
+                return false;
+            }
+
+            // Get or create basket for user
+            let basket = await prisma.basket.findUnique({
+                where: { userId },
+            });
+
+            if (!basket) {
+                basket = await prisma.basket.create({
+                    data: { userId },
+                });
+            }
+
+            // Get current quantity for this product in the basket
+            const existingItem = await prisma.basketItem.findUnique({
+                where: {
+                    basketId_productId: {
+                        basketId: basket.basketId,
+                        productId,
+                    },
+                },
+            });
+
+            const currentQuantity = existingItem?.quantity ?? 0;
+            const newQuantity = currentQuantity + quantity;
 
             if (newQuantity > maxQuantity) {
                 return false;
             }
 
-            items.set(productId, newQuantity);
-            if (!basket) {
-                if (baskets.size >= maxBaskets) {
-                    evictOldestBasket();
-                }
-                baskets.set(basketId, { items, expiresAt: currentTime + ttlMs });
+            if (existingItem) {
+                await prisma.basketItem.update({
+                    where: {
+                        basketId_productId: {
+                            basketId: basket.basketId,
+                            productId,
+                        },
+                    },
+                    data: { quantity: newQuantity },
+                });
+            } else {
+                await prisma.basketItem.create({
+                    data: {
+                        basketId: basket.basketId,
+                        productId,
+                        quantity: newQuantity,
+                    },
+                });
             }
+
             return true;
         },
     };
