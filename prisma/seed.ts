@@ -239,15 +239,34 @@ async function main() {
         console.log(`${updatedPasswordCount} customer passwords initialized`);
     }
 
-    if ((await prisma.product.count()) === 0) {
-        const result = await prisma.product.createMany({
-            data: products,
-        });
+    const supplier = await prisma.supplier.findFirst();
+    let createdProducts = 0;
 
-        console.log(`${result.count} products seeded`);
-    } else {
-        console.log('Products already exist, skipping seed');
+    for (const { images = [], ...product } of products) {
+        const existing = await prisma.product.findFirst({ where: { name: product.name } });
+        const productId = existing
+            ? (await prisma.product.update({ where: { productId: existing.productId }, data: product })).productId
+            : (await prisma.product.create({ data: product })).productId;
+            
+        if (!existing) {
+            createdProducts++;
+            // Without an inventory row the product shows as out of stock.
+            if (supplier) {
+                await prisma.inventory.create({
+                    data: { productId, supplierId: supplier.supplierId, quantity: 20, marketValue: product.price },
+                });
+            }
+        }
+
+        await prisma.productImage.deleteMany({ where: { productId } });
+        if (images.length > 0) {
+            await prisma.productImage.createMany({
+                data: images.map((url, position) => ({ productId, url, position, altText: product.name })),
+            });
+        }
     }
+
+    console.log(`${createdProducts} new products seeded`);
 
     const seedPassword = process.env.ADMIN_SEED_PASSWORD;
     const adminCount = await prisma.adminUser.count();

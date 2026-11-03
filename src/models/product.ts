@@ -20,6 +20,7 @@ export interface ExpandedProductData {
   description: string;
   price: number;
   imageURL: string;
+  images: { url: string; altText: string | null }[];
   inventory: ProductInventory;
 }
 

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { products } from '../prisma/products.ts'
 
-test('product seed contains 50 uniquely named products, ten per category', () => {
-  assert.equal(products.length, 50)
-  assert.equal(new Set(products.map((product) => product.name)).size, 50)
+test('product seed contains 51 uniquely named products, ten per category', () => {
+  assert.equal(products.length, 51)
+  assert.equal(new Set(products.map((product) => product.name)).size, 51)
 
   const counts = {}
   for (const product of products) {
@@ -12,7 +12,7 @@ test('product seed contains 50 uniquely named products, ten per category', () =>
   }
 
   assert.deepEqual(counts, {
-    Laptops: 10,
+    Laptops: 11,
     Monitors: 10,
     Keyboards: 10,
     Mice: 10,
