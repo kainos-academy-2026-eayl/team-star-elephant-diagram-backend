@@ -22,6 +22,21 @@ let baseUrl;
 let products;
 let serviceError;
 let repositoryError;
+let baskets;
+
+const basketRepository = {
+  async getItems(basketId) {
+    return baskets.get(basketId) ?? new Map();
+  },
+  async addQuantity(basketId, productId, quantity, maxQuantity) {
+    const items = baskets.get(basketId) ?? new Map();
+    const newQuantity = (items.get(productId) ?? 0) + quantity;
+    if (newQuantity > maxQuantity) return false;
+    items.set(productId, newQuantity);
+    baskets.set(basketId, items);
+    return true;
+  },
+};
 
 before(async () => {
   const app = createApp({ productRepository: {
@@ -37,7 +52,7 @@ before(async () => {
       if (repositoryError) throw repositoryError;
       return catalogue.filter((product) => ids.includes(product.productId));
     },
-  } });
+  }, basketRepository });
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -47,13 +62,11 @@ after(() => new Promise((resolve, reject) => {
   server.close((error) => error ? reject(error) : resolve());
 }));
 
-beforeEach(async () => {
+beforeEach(() => {
   products = [];
   serviceError = undefined;
   repositoryError = undefined;
-  // Clear baskets and basket items between tests to avoid cross-test pollution
-  await prisma.basketItem.deleteMany({});
-  await prisma.basket.deleteMany({});
+  baskets = new Map();
 });
 
 test('the default product repository reads stored products in ID order', async (t) => {
