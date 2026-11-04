@@ -1,9 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { BasketQuantityError, type BasketService } from '../services/basketService';
+import { BasketItemNotFoundError, BasketQuantityError, type BasketService } from '../services/basketService';
 import { ProductNotFoundError } from '../services/productService';
 import type { TokenService } from '../services/tokenService';
-import { addToBasketSchema } from '../validators/basketSchema';
+import { addToBasketSchema, basketItemParamsSchema, updateBasketItemSchema } from '../validators/basketSchema';
 
 function extractAccessToken(req: Request): string | undefined {
     const header = req.get('authorization') ?? '';
@@ -65,6 +65,61 @@ export function createBasketRouter(basketService: BasketService, tokens: TokenSe
                 return;
             }
             console.error('Add to basket failed.', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+
+    router.patch('/items/:productId', async (req: Request, res: Response) => {
+        const userId = await requireCustomerAuth(req, res);
+        if (userId === null) return;
+
+        const params = basketItemParamsSchema.safeParse(req.params);
+        const body = updateBasketItemSchema.safeParse(req.body ?? {});
+        if (!params.success || !body.success) {
+            res.status(400).json({
+                error: 'Invalid basket item',
+                details: {
+                    ...(params.success ? {} : z.flattenError(params.error).fieldErrors),
+                    ...(body.success ? {} : z.flattenError(body.error).fieldErrors),
+                },
+            });
+            return;
+        }
+
+        try {
+            res.status(200).json(await basketService.updateItemQuantity(userId, params.data.productId, body.data.quantity));
+        } catch (error) {
+            if (error instanceof BasketItemNotFoundError) {
+                res.status(404).json({ error: 'Item not found in basket' });
+                return;
+            }
+            if (error instanceof BasketQuantityError) {
+                res.status(400).json({ error: error.message });
+                return;
+            }
+            console.error('Basket quantity update failed.', error);
+            res.status(500).json({ error: 'Internal server error' });
+        }
+    });
+
+    router.delete('/items/:productId', async (req: Request, res: Response) => {
+        const userId = await requireCustomerAuth(req, res);
+        if (userId === null) return;
+
+        const params = basketItemParamsSchema.safeParse(req.params);
+        if (!params.success) {
+            res.status(400).json({ error: 'Invalid basket item', details: z.flattenError(params.error).fieldErrors });
+            return;
+        }
+
+        try {
+            res.status(200).json(await basketService.removeItem(userId, params.data.productId));
+        } catch (error) {
+            if (error instanceof BasketItemNotFoundError) {
+                res.status(404).json({ error: 'Item not found in basket' });
+                return;
+            }
+            console.error('Basket item removal failed.', error);
             res.status(500).json({ error: 'Internal server error' });
         }
     });

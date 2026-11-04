@@ -2,8 +2,8 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
 import { createAuthRateLimiter } from '../middleware/authRateLimiter';
-import { DASHBOARD_BY_ROLE } from '../models/adminRoles';
-import { requireAdmin } from '../middleware/requireAdmin';
+import { DASHBOARD_BY_ROLE, type AdminAction, type AdminResource } from '../models/adminRoles';
+import { requireAdmin, requirePermission } from '../middleware/requireAdmin';
 import {
 	InvalidCredentialsError,
 	UnknownAdminRoleError,
@@ -60,12 +60,21 @@ export function adminController(
 				res.status(401).json({ error: 'Authentication required' });
 				return;
 			}
+			res.locals.currentAdmin = admin;
 			next();
 		} catch (error) {
 			console.error('Admin lookup failed', error);
 			res.status(500).json({ error: 'Internal server error' });
 		}
 	};
+
+	// Route-level RBAC: authenticate, load the current stored role, then check Role -> Resource -> Action.
+	const authorize = <R extends AdminResource>(resource: R, action: AdminAction<R>) => [
+		adminRateLimit,
+		requireAdmin(tokens),
+		requireCurrentAdmin,
+		requirePermission(resource, action),
+	];
 
 	router.post('/admin/login', createAuthRateLimiter(rateLimitOptions), async (req: Request, res: Response) => {
 		const loginValidation = loginSchema.safeParse(req.body);
@@ -110,26 +119,23 @@ export function adminController(
 		['/admin/me', '/admin'],
 		adminRateLimit,
 		requireAdmin(tokens),
+		requireCurrentAdmin,
 		async (req: Request, res: Response) => {
-			try {
-				const admin = await adminService.findById(
-					res.locals.admin?.adminId ?? -1,
-				);
-				if (!admin) {
-					res.status(401).json({ error: 'Authentication required' });
-					return;
-				}
-				res.set('Cache-Control', 'no-store');
-				if (req.path === '/admin') {
-					res.json({
-						staff: { name: `${admin.forename} ${admin.surname}` },
-						error: 'You are logged in. Dashboard metrics are not implemented yet.',
-					});
-					return;
-				}
+			const admin = res.locals.currentAdmin;
+			if (!admin) {
+				res.status(401).json({ error: 'Authentication required' });
+				return;
+			}
+			res.set('Cache-Control', 'no-store');
+			if (req.path !== '/admin') {
 				res.json({ ...admin, admin });
+				return;
+			}
+			try {
+				// Single dashboard endpoint; content is scoped to the admin's role permissions.
+				res.json(await adminService.getDashboard(admin));
 			} catch (error) {
-				console.error('Admin lookup failed', error);
+				console.error('Admin dashboard failed', error);
 				res.status(500).json({ error: 'Internal server error' });
 			}
 		},
@@ -168,9 +174,7 @@ export function adminController(
 
 	router.get(
 		'/admin/users',
-		adminRateLimit,
-		requireAdmin(tokens),
-		requireCurrentAdmin,
+		...authorize('users', 'view'),
 		async (req: Request, res: Response) => {
 			const query = userListQuerySchema.safeParse(req.query);
 			if (!query.success) {
@@ -191,9 +195,7 @@ export function adminController(
 
 	router.get(
 		'/admin/users/:id',
-		adminRateLimit,
-		requireAdmin(tokens),
-		requireCurrentAdmin,
+		...authorize('users', 'view'),
 		async (req: Request, res: Response) => {
 			const userId = userIdSchema.safeParse(req.params.id);
 			try {
@@ -216,9 +218,7 @@ export function adminController(
 	] as const) {
 		router.post(
 			`/admin/users/:id/${action}`,
-			adminRateLimit,
-			requireAdmin(tokens),
-			requireCurrentAdmin,
+			...authorize('users', action),
 			async (req: Request, res: Response) => {
 				const userId = userIdSchema.safeParse(req.params.id);
 				try {
@@ -238,9 +238,7 @@ export function adminController(
 
 	router.get(
 		'/admin/baskets',
-		adminRateLimit,
-		requireAdmin(tokens),
-		requireCurrentAdmin,
+		...authorize('baskets', 'view'),
 		async (req: Request, res: Response) => {
 			const query = basketListQuerySchema.safeParse(req.query);
 			if (!query.success) {
@@ -261,9 +259,7 @@ export function adminController(
 
 	router.get(
 		'/admin/baskets/:id',
-		adminRateLimit,
-		requireAdmin(tokens),
-		requireCurrentAdmin,
+		...authorize('baskets', 'view'),
 		async (req: Request, res: Response) => {
 			const basketId = userIdSchema.safeParse(req.params.id);
 			try {

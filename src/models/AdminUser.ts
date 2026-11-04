@@ -63,3 +63,15 @@ export interface AdminBasketDetailsResponse {
         total: string;
     };
 }
+// Role-scoped admin dashboard; must match frontend AdminDashboard in src/services/adminService.ts.
+export interface AdminDashboardResponse {
+    staff: { name: string };
+    role: string;
+    dashboard: string;
+    sections: Array<{ label: string }>;
+    quickActions: Array<{ label: string }>;
+    cards: Array<{ label: string; value: string }>;
+    recentOrders: Array<{ id: number; customer: string; date: string; status: string }>;
+    newUsers: Array<{ name: string; email: string; joined: string }>;
+    stockChanges: Array<{ product: string; amount: string; reason: string }>;
+}

@@ -76,3 +76,26 @@ test('basket item and activity updates roll back together on activity write fail
 	assert.equal(state.items[0].quantity, 3);
 	assert.notEqual(state.basket.updatedAt, originalUpdatedAt);
 });
+
+test('basket item quantity changes and removals are scoped to the customer basket', async () => {
+	const calls = [];
+	const counts = { updateMany: 1, deleteMany: 0 };
+	const tx = {
+		basketItem: {
+			updateMany: async (args) => { calls.push(['updateMany', args]); return { count: counts.updateMany }; },
+			deleteMany: async (args) => { calls.push(['deleteMany', args]); return { count: counts.deleteMany }; },
+		},
+		basket: { update: async (args) => { calls.push(['touch', args.where]); } },
+	};
+	const repository = createDatabaseBasketRepository({ $transaction: (operation) => operation(tx) });
+
+	assert.equal(await repository.setQuantity('7', 3, 4), true);
+	assert.equal(await repository.removeItem('7', 3), false);
+	assert.equal(await repository.setQuantity('not-a-user', 3, 4), false);
+
+	assert.deepEqual(calls, [
+		['updateMany', { where: { productId: 3, basket: { userId: 7 } }, data: { quantity: 4 } }],
+		['touch', { userId: 7 }],
+		['deleteMany', { where: { productId: 3, basket: { userId: 7 } } }],
+	]);
+});
