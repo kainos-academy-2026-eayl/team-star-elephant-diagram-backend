@@ -159,7 +159,7 @@ export async function convertReservationToOrder(
   reservationId: number,
   userId: number,
   totalCost: number,
-  paymentMethod?: string
+  _paymentMethod?: string
 ) {
   try {
     const reservation = await prisma.reservation.findUnique({

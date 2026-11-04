@@ -1,27 +1,45 @@
-import { Router, type Request, type Response } from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { Router, type NextFunction, type Request, type Response } from 'express';
+import { requireAdmin } from '../middleware/requireAdmin';
+import type { TokenService } from '../services/tokenService';
 import ReservationController from './reservationController';
 
-export function createReservationRouter(): Router {
+function requireCustomer(tokens: TokenService) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const header = req.get('authorization') ?? '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    const payload = token ? await tokens.verifyCustomerAccessToken(token) : null;
+
+    if (!payload || typeof payload.userId !== 'number') {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    res.locals.customerId = payload.userId;
+    next();
+  };
+}
+
+export function createReservationRouter(tokens: TokenService): Router {
   const router = Router();
+  const requireCustomerAuth = requireCustomer(tokens);
 
   // Checkout - Create reservation from basket
-  router.post('/checkout/reserve', authenticateToken, ReservationController.createCheckoutReservation);
+  router.post('/checkout/reserve', requireCustomerAuth, ReservationController.createCheckoutReservation);
 
   // Get active reservation
-  router.get('/reservations/active', authenticateToken, ReservationController.getActiveReservation);
+  router.get('/reservations/active', requireCustomerAuth, ReservationController.getActiveReservation);
 
   // Cancel reservation (continue shopping)
-  router.post('/reservations/cancel', authenticateToken, ReservationController.cancelReservation);
+  router.post('/reservations/cancel', requireCustomerAuth, ReservationController.cancelReservation);
 
   // Convert reservation to order (after payment)
-  router.post('/orders/from-reservation', authenticateToken, ReservationController.convertToOrder);
+  router.post('/orders/from-reservation', requireCustomerAuth, ReservationController.convertToOrder);
 
   // Get available quantity for product (accounting for reservations)
   router.get('/products/:productId/available-quantity', ReservationController.getAvailableQuantity);
 
   // Admin cleanup (for testing/admin)
-  router.post('/admin/cleanup-reservations', authenticateToken, ReservationController.cleanupExpiredReservations);
+  router.post('/admin/cleanup-reservations', requireAdmin(tokens), ReservationController.cleanupExpiredReservations);
 
   return router;
 }

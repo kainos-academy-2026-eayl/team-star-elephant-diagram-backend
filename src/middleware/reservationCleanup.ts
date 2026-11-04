@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { cleanupExpiredReservations } from '../services/reservationService';
 
 let lastCleanupTime = Date.now();
@@ -9,8 +9,8 @@ const CLEANUP_INTERVAL_MS = 60000; // Run cleanup every 1 minute
  * Runs every 1 minute to prevent old reservations from blocking stock
  */
 export async function reservationCleanupMiddleware(
-  req: Request,
-  res: Response,
+  _req: Request,
+  _res: Response,
   next: NextFunction
 ) {
   const now = Date.now();

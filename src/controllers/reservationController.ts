@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import type { Request, Response } from 'express';
 import {
   createCheckoutReservation,
   cancelReservation,
@@ -8,14 +8,30 @@ import {
   getAvailableQuantity
 } from '../services/reservationService';
 
+declare module 'express-serve-static-core' {
+  interface Locals {
+    customerId?: number;
+  }
+}
+
+function getAuthenticatedCustomerId(res: Response): number | null {
+  const userId = res.locals.customerId;
+  if (typeof userId !== 'number') {
+    res.status(401).json({ message: 'Authentication required' });
+    return null;
+  }
+  return userId;
+}
+
 export class ReservationController {
   /**
    * POST /api/checkout/reserve
    * Creates a reservation from user's basket when proceeding to checkout
    */
-  static async createCheckoutReservation(req: Request, res: Response) {
+  static async createCheckoutReservation(_req: Request, res: Response) {
     try {
-      const userId = (req.user as { id: number }).id;
+      const userId = getAuthenticatedCustomerId(res);
+      if (userId === null) return;
 
       const result = await createCheckoutReservation(userId);
       res.status(201).json(result);
@@ -29,9 +45,10 @@ export class ReservationController {
    * GET /api/reservations/active
    * Gets the user's active reservation with remaining time
    */
-  static async getActiveReservation(req: Request, res: Response) {
+  static async getActiveReservation(_req: Request, res: Response) {
     try {
-      const userId = (req.user as { id: number }).id;
+      const userId = getAuthenticatedCustomerId(res);
+      if (userId === null) return;
 
       const reservation = await getUserReservation(userId);
 
@@ -54,9 +71,10 @@ export class ReservationController {
    * Cancels the user's reservation and returns stock
    * Called when user clicks "continue shopping"
    */
-  static async cancelReservation(req: Request, res: Response) {
+  static async cancelReservation(_req: Request, res: Response) {
     try {
-      const userId = (req.user as { id: number }).id;
+      const userId = getAuthenticatedCustomerId(res);
+      if (userId === null) return;
 
       const reservation = await getUserReservation(userId);
 
@@ -80,7 +98,8 @@ export class ReservationController {
    */
   static async convertToOrder(req: Request, res: Response) {
     try {
-      const userId = (req.user as { id: number }).id;
+      const userId = getAuthenticatedCustomerId(res);
+      if (userId === null) return;
       const { totalCost, paymentMethod } = req.body;
 
       if (!totalCost) {
@@ -129,7 +148,7 @@ export class ReservationController {
    * POST /admin/cleanup-reservations
    * Manually cleanup expired reservations
    */
-  static async cleanupExpiredReservations(req: Request, res: Response) {
+  static async cleanupExpiredReservations(_req: Request, res: Response) {
     try {
       const result = await cleanupExpiredReservations();
       res.json(result);
