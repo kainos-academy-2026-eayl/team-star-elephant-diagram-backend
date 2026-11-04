@@ -44,6 +44,7 @@ model User {
   orders         Order[]
   paymentDetails PaymentDetail[]
   basket        Basket?
+  reservation   Reservation?
 }
 
 model Product {
@@ -60,6 +61,7 @@ model Product {
   basketItems BasketItem[]
   orderItems  OrderItem[]
   images      ProductImage[]
+  reservationItems ReservationItem[]
 
 
   @@index([name])
@@ -182,3 +184,25 @@ model ProductImage {
 
   @@unique([productId, position])
 }
+
+model Reservation {
+  reservationId  Int       @id @unique @default(autoincrement()) @map("reservation_id")
+  userId    Int       @unique
+  user      User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  items     ReservationItem[]
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
+}
+
+model ReservationItem {
+  reservationItemId Int    @id @unique @default(autoincrement()) @map("reservation_item_id")
+  reservationId     Int
+  reservation       Reservation @relation(fields: [reservationId], references: [reservationId], onDelete: Cascade)
+  productId    Int
+  product      Product @relation(fields: [productId], references: [productId])
+  quantity     Int
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([reservationId, productId])
+}
+
