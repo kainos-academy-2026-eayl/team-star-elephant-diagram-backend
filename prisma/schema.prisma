@@ -107,6 +107,7 @@ model Order {
   orderPlacedAt DateTime    @default(now()) @map("order_placed_at")
   orderStatus   OrderStatus @default(PENDING) @map("order_status")
   cost          Decimal     @map("cost") @db.Decimal(10, 2)
+  shippingFee   Decimal     @default(20.00) @map("shipping_fee") @db.Decimal(10, 2)
   modifiedAt    DateTime    @default(now()) @updatedAt @map("modified_at")
   userId        Int
   user          User        @relation(fields: [userId], references: [userId])

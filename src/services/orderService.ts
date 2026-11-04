@@ -17,6 +17,7 @@ export interface OrderRecord {
 	orderId: number;
 	userId: number;
 	cost: number;
+	shippingFee: number;
 	items: OrderItem[];
 	orderStatus: string;
 	orderPlacedAt: Date;
@@ -29,6 +30,10 @@ export class OrderService {
 		private readonly products: ProductRepository,
 		private readonly baskets: BasketRepository,
 	) {}
+
+	private calculateShippingFee(subtotal: number): number {
+		return subtotal > 200 ? 30 : 20;
+	}
 
 	async createOrderFromReservation(userId: number, reservationId: number): Promise<OrderRecord> {
 		// Get reservation
@@ -68,13 +73,17 @@ export class OrderService {
 			});
 		}
 
+		// Calculate shipping fee based on subtotal
+		const shippingFee = this.calculateShippingFee(totalCost);
+
 		// Create order and order items in a transaction
 		const order = await this.prisma.$transaction(async (tx) => {
-			// Create order
+			// Create order with shipping fee
 			const createdOrder = await tx.order.create({
 				data: {
 					userId,
 					cost: totalCost,
+					shippingFee,
 					orderStatus: 'PENDING',
 				},
 			});
@@ -106,6 +115,7 @@ export class OrderService {
 			orderId: order.orderId,
 			userId: order.userId,
 			cost: Number(order.cost),
+			shippingFee: Number(order.shippingFee),
 			items: orderItems,
 			orderStatus: order.orderStatus,
 			orderPlacedAt: order.orderPlacedAt,
@@ -126,6 +136,7 @@ export class OrderService {
 			orderId: order.orderId,
 			userId: order.userId,
 			cost: Number(order.cost),
+			shippingFee: Number(order.shippingFee),
 			items: order.orderItems.map((oi) => ({
 				productId: oi.productId,
 				quantity: oi.quantity,
