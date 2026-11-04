@@ -74,10 +74,12 @@ export function createApp({
 	const adminService = new AdminUserService(adminRepository, userRepository, basketService);
 	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
 
+	const productService = new ProductService(productsRepository);
+
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
-	app.use('/products', createProductRouter(new ProductService(productsRepository)));
+	app.use('/products', createProductRouter(productService));
 	app.use('/basket', createBasketRouter(basketService, tokenService));
-	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
+	app.use(adminController(adminService, tokenService, sessions, productService, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
 

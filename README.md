@@ -162,6 +162,7 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | `POST /admin/users/:id/reactivate` | Admin only. Sets the customer back to `active`. |
 | `GET /admin/baskets?search=&page=` | Admin only. Lists customer baskets (20 per page), most recent activity first; `search` (or `q`) matches basket ID, customer name or email, case-insensitive. |
 | `GET /admin/baskets/:id` | Admin only. Basket details with customer, priced items and total; 404 for unknown IDs. |
+| `POST /admin/products` | Requires `inventory:create` (SuperAdmin, InventoryManager). JSON `imageURL` (http/https URL, ≤255), `name` (≤100), `description` (≤255), `category` (≤100), `price` (> 0, ≤ 99,999,999.99, max 2 decimals; number or numeric string). Returns 201 with the product and a `Location` header; 400 with field `details` on validation failure, 401 unauthenticated, 403 for other roles. |
 
 `POST /admin/logout` remains a compatibility alias. The refresh endpoint is
 `/auth/refresh`, not `/admin/refresh`. Customer order history is not implemented;

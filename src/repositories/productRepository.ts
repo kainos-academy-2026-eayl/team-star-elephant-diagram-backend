@@ -1,10 +1,11 @@
-import type { ExpandedProductData, Product } from '../models/product';
+import type { CreateProductInput, ExpandedProductData, Product } from '../models/product';
 import prisma from '../prismaClient';
 
 export interface ProductRepository {
   findAll(): Promise<readonly Product[]>;
   findById(productId: number): Promise<ExpandedProductData | null>;
   findByIds(productIds: readonly number[]): Promise<readonly Pick<Product, 'productId' | 'name' | 'price' | 'imageURL'>[]>;
+  create(product: CreateProductInput): Promise<Product>;
 }
 
 export const productRepository: ProductRepository = {
@@ -51,5 +52,10 @@ export const productRepository: ProductRepository = {
       select: { productId: true, name: true, price: true, imageURL: true },
     });
     return products.map((product) => ({ ...product, price: product.price.toNumber() }));
+  },
+
+  async create({ name, description, category, price, imageURL }) {
+    const product = await prisma.product.create({ data: { name, description, category, price, imageURL } });
+    return { ...product, price: product.price.toNumber() };
   },
 };
