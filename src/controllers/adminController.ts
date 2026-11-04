@@ -1,4 +1,5 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import { OrderStatus } from '@prisma/client';
 import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
 import { createAuthRateLimiter } from '../middleware/authRateLimiter';
@@ -6,6 +7,7 @@ import { DASHBOARD_BY_ROLE, type AdminAction, type AdminResource } from '../mode
 import { requireAdmin, requirePermission } from '../middleware/requireAdmin';
 import {
 	InvalidCredentialsError,
+	InvalidOrderStatusTransitionError,
 	UnknownAdminRoleError,
 	type AdminUserService,
 } from '../services/AdminUserService';
@@ -42,6 +44,28 @@ const basketListQuerySchema = z
 		page: z.coerce.number().int().positive().max(100_000).optional(),
 	})
 	.transform(({ search, q, page }) => ({ search: search || q || undefined, page }));
+
+// Case-insensitive so form values like "shipped" are accepted.
+const orderStatusSchema = z.preprocess(
+	(value) => (typeof value === 'string' ? value.trim().toUpperCase() : value),
+	z.enum(OrderStatus),
+);
+
+// Same search/page contract as /admin/baskets, plus an optional status filter for fulfilment queues.
+const orderListQuerySchema = z
+	.object({
+		search: z.string().trim().max(100).optional(),
+		q: z.string().trim().max(100).optional(),
+		status: z.union([z.literal(''), orderStatusSchema]).optional(),
+		page: z.coerce.number().int().positive().max(100_000).optional(),
+	})
+	.transform(({ search, q, status, page }) => ({
+		search: search || q || undefined,
+		status: status || undefined,
+		page,
+	}));
+
+const orderStatusUpdateSchema = z.object({ status: orderStatusSchema });
 
 // Upper bound of Product.price, a Postgres DECIMAL(10, 2).
 const MAX_PRODUCT_PRICE = 99_999_999.99;
@@ -318,6 +342,84 @@ export function adminController(
 				res.set('Cache-Control', 'no-store').json(details);
 			} catch (error) {
 				console.error('Admin basket lookup failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.get(
+		'/admin/orders',
+		...authorize('orders', 'view'),
+		async (req: Request, res: Response) => {
+			const query = orderListQuerySchema.safeParse(req.query);
+			if (!query.success) {
+				res.status(400).json({
+					error: 'Invalid order search',
+					details: z.flattenError(query.error).fieldErrors,
+				});
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(await adminService.listOrders(query.data));
+			} catch (error) {
+				console.error('Admin order list failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.get(
+		'/admin/orders/:id',
+		...authorize('orders', 'view'),
+		async (req: Request, res: Response) => {
+			const orderId = userIdSchema.safeParse(req.params.id);
+			try {
+				const details = orderId.success ? await adminService.getOrderDetails(orderId.data) : null;
+				if (!details) {
+					res.status(404).json({ error: 'Order not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json(details);
+			} catch (error) {
+				console.error('Admin order lookup failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.post(
+		'/admin/orders/:id/status',
+		...authorize('orders', 'update'),
+		async (req: Request, res: Response) => {
+			const orderId = userIdSchema.safeParse(req.params.id);
+			if (!orderId.success) {
+				res.status(404).json({ error: 'Order not found' });
+				return;
+			}
+			const input = orderStatusUpdateSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				res.status(400).json({
+					error: 'Invalid order status',
+					details: z.flattenError(input.error).fieldErrors,
+				});
+				return;
+			}
+			try {
+				const result = await adminService.updateOrderStatus(orderId.data, input.data.status);
+				if (!result) {
+					res.status(404).json({ error: 'Order not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json(result);
+			} catch (error) {
+				if (error instanceof InvalidOrderStatusTransitionError) {
+					res.status(400).json({
+						error: 'Invalid status transition',
+						details: { from: error.from, to: error.to },
+					});
+					return;
+				}
+				console.error('Admin order status update failed', error);
 				res.status(500).json({ error: 'Internal server error' });
 			}
 		},
