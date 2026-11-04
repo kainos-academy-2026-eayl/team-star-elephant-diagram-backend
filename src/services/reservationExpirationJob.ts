@@ -21,6 +21,7 @@ export class ReservationExpirationJob {
 				console.error('Error expiring reservations:', error);
 			});
 		}, this.CHECK_INTERVAL_SECONDS * 1000);
+		this.intervalId.unref();
 	}
 
 	stop(): void {
