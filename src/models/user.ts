@@ -24,6 +24,13 @@ export interface CreatedUser {
   postcode: string;
 }
 
+export interface ShippingAddress {
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  postcode: string;
+}
+
 export type UserStatus = 'ACTIVE' | 'SUSPENDED';
 
 export interface User extends NewUser {
