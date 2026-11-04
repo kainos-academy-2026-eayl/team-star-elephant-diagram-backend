@@ -1,4 +1,4 @@
-import type { ExpandedProductData, Product } from '../models/product';
+import type { CreateProductInput, ExpandedProductData, Product } from '../models/product';
 import type { ProductRepository } from '../repositories/productRepository';
 
 export class ProductNotFoundError extends Error {
@@ -22,5 +22,9 @@ export class ProductService {
     }
 
     return product;
+  }
+
+  async createProduct(input: CreateProductInput): Promise<Product> {
+    return this.products.create(input);
   }
 }

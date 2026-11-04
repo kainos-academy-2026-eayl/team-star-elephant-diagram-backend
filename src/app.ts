@@ -90,6 +90,8 @@ export function createApp({
 	const basketService = new BasketService(productsRepository, basketRepository);
 	const adminService = new AdminUserService(adminRepository, userRepository, basketService);
 	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
+
+	const productService = new ProductService(productsRepository);
 	const reservationService = new ReservationService(
 		reservationRepository,
 		inventoryRepository,
@@ -99,11 +101,12 @@ export function createApp({
 	const orderService = new OrderService(prisma, reservationRepository, productsRepository, basketRepository);
 
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
-	app.use('/products', createProductRouter(new ProductService(productsRepository)));
+	app.use('/products', createProductRouter(productService));
 	app.use('/basket', createBasketRouter(basketService, tokenService));
 	app.use('/checkout', createCheckoutRouter(reservationService, tokenService));
 	app.use('/payment', createPaymentRouter(orderService, tokenService));
 	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
+	app.use(adminController(adminService, tokenService, sessions, productService, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
 
