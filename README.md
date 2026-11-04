@@ -72,16 +72,22 @@ After configuring `DATABASE_URL` and applying migrations, run:
 npm run db:seed
 ```
 
-The seed inserts 50 fictional hardware products: ten each in Laptops, Monitors,
-Keyboards, Mice and Headsets. [prisma/products.ts](prisma/products.ts) exports a
-typed array suitable for `prisma.product.createMany({ data: products })`.
+The seed inserts 51 fictional hardware products across Laptops, Monitors,
+Keyboards, Mice and Headsets, plus 30 team merchandise products across T-Shirts,
+Hats, Scarves, Keyrings, Socks, Sliders, Drinkware, Accessories, Bags, Home, Toys,
+Pets and Jumpers. [prisma/products.ts](prisma/products.ts)
+exports the typed product array.
 Prices are representative GBP amounts, not live retail offers. Unsplash category
 stock photos are shared within each category and illustrate the hardware type;
-they are not photographs of the exact products.
+they are not photographs of the exact products. Merchandise images use
+same-site paths such as `/images/TeamB-tshirt-front.png`, served by the frontend
+from `src/pages/images`; each product lists all of its views (front, back,
+detail) as gallery images, with the first used as the main image.
 
-Products are inserted only when the product table is empty. Existing products
-are left unchanged, so an existing catalogue (including the old sample products)
-will not be replaced or topped up. The existing user seed is preserved.
+Products are matched by name: new products are created with a stock row, and
+existing products with the same name are updated and have their gallery images
+replaced. Products not in the seed are left unchanged. The existing user seed is
+preserved.
 
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
 
