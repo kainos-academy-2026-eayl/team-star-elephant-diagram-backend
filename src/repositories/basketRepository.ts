@@ -19,6 +19,7 @@ export interface BasketRepository {
     // Returns productId -> quantity for the basket.
     getItems(basketId: string): Promise<ReadonlyMap<number, number>>;
     addQuantity(basketId: string, productId: number, quantity: number, maxQuantity: number): Promise<boolean>;
+    removeItem(basketId: string, productId: number): Promise<boolean>;
     list(search: string | undefined, skip: number, take: number): Promise<BasketListResult>;
     findByBasketId(basketId: number): Promise<BasketRecord | null>;
 }
@@ -162,6 +163,41 @@ export function createDatabaseBasketRepository(prisma: PrismaClient): BasketRepo
 
                 return true;
             });
+        },
+
+        async removeItem(basketId, productId) {
+            const userId = parseInt(basketId, 10);
+            if (!Number.isSafeInteger(userId) || userId <= 0) {
+                return false;
+            }
+
+            try {
+                const basket = await prisma.basket.findUnique({
+                    where: { userId },
+                });
+
+                if (!basket) {
+                    return false;
+                }
+
+                const result = await prisma.basketItem.deleteMany({
+                    where: {
+                        basketId: basket.basketId,
+                        productId,
+                    },
+                });
+
+                if (result.count > 0) {
+                    await prisma.basket.update({
+                        where: { basketId: basket.basketId },
+                        data: { updatedAt: new Date() },
+                    });
+                }
+
+                return result.count > 0;
+            } catch {
+                return false;
+            }
         },
     };
 }
