@@ -24,4 +24,4 @@ export interface ExpandedProductData {
   inventory: ProductInventory;
 }
 
-
+export type CreateProductInput = Pick<Product, 'name' | 'description' | 'category' | 'price' | 'imageURL'>;
