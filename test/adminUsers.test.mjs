@@ -72,6 +72,7 @@ const products = new Map([
 	[1, { productId: 1, name: 'Green tea', price: 3.5, imageURL: '/tea.png' }],
 	[2, { productId: 2, name: 'Coffee beans', price: 39, imageURL: '/coffee.png' }],
 ]);
+const productCreateCalls = [];
 const productRepository = {
 	async findAll() {
 		return [...products.values()];
@@ -81,6 +82,17 @@ const productRepository = {
 	},
 	async findByIds(productIds) {
 		return productIds.map((id) => products.get(id)).filter(Boolean);
+	},
+	async create(input) {
+		productCreateCalls.push(input);
+		const product = {
+			...input,
+			productId: products.size + 1,
+			createdAt: new Date(),
+			modifiedAt: new Date(),
+		};
+		products.set(product.productId, product);
+		return product;
 	},
 };
 
@@ -126,6 +138,7 @@ let server;
 let url;
 let adminToken;
 let passwordHash;
+let productRequestIp = 0;
 before(async () => {
 	passwordHash = await argon2.hash('correct-horse', ARGON2_OPTIONS);
 	adminToken = await tokens.signAccessToken({ adminId: 1, role: 'SuperAdmin' });
@@ -137,6 +150,7 @@ before(async () => {
 		tokenService: tokens,
 		refreshSessionRepository: memoryRefreshSessions(),
 		authRateLimitOptions: { limit: 1000 },
+		trustedProxyAddresses: ['127.0.0.1'],
 	}).listen(0, '127.0.0.1');
 	await once(server, 'listening');
 	url = `http://127.0.0.1:${server.address().port}`;
@@ -160,6 +174,10 @@ const customer = (userId, forename, surname, email, overrides = {}) => ({
 });
 
 beforeEach(() => {
+	for (const productId of products.keys()) {
+		if (productId > 2) products.delete(productId);
+	}
+	productCreateCalls.length = 0;
 	users.clear();
 	admins.clear();
 	admins.set(1, { adminId: 1, forename: 'Test', surname: 'Admin', email: 'admin@example.com', role: 'SuperAdmin' });
@@ -196,6 +214,23 @@ const request = (method, path, token = adminToken) =>
 	});
 const get = (path, token) => request('GET', path, token);
 const post = (path, token) => request('POST', path, token);
+const postProduct = (input, token = adminToken) =>
+	fetch(`${url}/admin/products`, {
+		method: 'POST',
+		headers: {
+			...(token ? { authorization: ['Bearer', token].join(' ') } : {}),
+			'content-type': 'application/json',
+			'x-forwarded-for': `192.0.2.${++productRequestIp}`,
+		},
+		body: JSON.stringify(input),
+	});
+const validProduct = {
+	imageURL: 'https://example.com/product.jpg',
+	name: 'Product name',
+	description: 'Product description',
+	category: 'Products',
+	price: 12.34,
+};
 const customerLogin = (password = 'correct-horse') =>
 	fetch(`${url}/login`, {
 		method: 'POST',
@@ -528,4 +563,101 @@ test('admin basket endpoints require a live admin access token', async () => {
 	admins.delete(1);
 	for (const path of ['/admin/baskets', '/admin/baskets/123'])
 		assert.equal((await get(path)).status, 401, `${path} for deleted admin`);
+});
+
+test('POST /admin/products creates products for SuperAdmin and InventoryManager', async () => {
+	for (const [index, role] of ['SuperAdmin', 'InventoryManager'].entries()) {
+		admins.set(1, { ...admins.get(1), role });
+		const token = await tokens.signAccessToken({ adminId: 1, role });
+		const input = { ...validProduct, price: index === 0 ? 12.34 : '12.34' };
+		const response = await postProduct(input, token);
+
+		assert.equal(response.status, 201);
+		assert.equal(response.headers.get('location'), `/products/${index + 3}`);
+		const product = await response.json();
+		assert.deepEqual(
+			{
+				productId: product.productId,
+				name: product.name,
+				description: product.description,
+				category: product.category,
+				price: product.price,
+				imageURL: product.imageURL,
+			},
+			{ ...validProduct, productId: index + 3 },
+		);
+		assert.deepEqual(productCreateCalls[index], { ...validProduct, price: 12.34 });
+		assert.deepEqual(products.get(index + 3), {
+			...validProduct,
+			productId: index + 3,
+			createdAt: products.get(index + 3).createdAt,
+			modifiedAt: products.get(index + 3).modifiedAt,
+		});
+	}
+});
+
+test('POST /admin/products rejects unauthorized requests without creating products', async () => {
+	const customerToken = await tokens.signAccess({
+		kind: 'customer',
+		userId: 1,
+		email: 'ada@example.com',
+	});
+	admins.set(1, { ...admins.get(1), role: 'Admin' });
+	const adminRoleToken = await tokens.signAccessToken({ adminId: 1, role: 'Admin' });
+
+	assert.equal((await postProduct(validProduct, '')).status, 401);
+	assert.equal((await postProduct(validProduct, customerToken)).status, 401);
+	assert.equal((await postProduct(validProduct, adminRoleToken)).status, 403);
+	assert.equal(productCreateCalls.length, 0);
+});
+
+test('POST /admin/products validates fields and price boundaries', async () => {
+	const invalidProducts = [
+		{ ...validProduct, imageURL: '' },
+		{ ...validProduct, imageURL: 'ftp://example.com/product.jpg' },
+		{ ...validProduct, name: ' ' },
+		{ ...validProduct, name: 'n'.repeat(101) },
+		{ ...validProduct, description: '' },
+		{ ...validProduct, category: '' },
+		...[
+			0,
+			-1,
+			'0',
+			'1.001',
+			1.001,
+			'0.000000001',
+			0.000000001,
+			'100000000',
+			100_000_000,
+		].map((price) => ({ ...validProduct, price })),
+	];
+	for (const input of invalidProducts) {
+		assert.equal((await postProduct(input)).status, 400, JSON.stringify(input));
+	}
+	assert.equal(productCreateCalls.length, 0);
+
+	for (const price of ['0.01', 99_999_999.99]) {
+		const response = await postProduct({ ...validProduct, price });
+		assert.equal(response.status, 201, String(price));
+		assert.equal((await response.json()).price, Number(price));
+	}
+	assert.equal(productCreateCalls.length, 2);
+});
+
+test('POST /admin/products returns 500 when product creation fails', async () => {
+	const originalCreate = productRepository.create;
+	const originalError = console.error;
+	productRepository.create = async () => {
+		throw new Error('database down');
+	};
+	console.error = () => {};
+	try {
+		const response = await postProduct(validProduct);
+		assert.equal(response.status, 500);
+		assert.deepEqual(await response.json(), { error: 'Internal server error' });
+		assert.equal(productCreateCalls.length, 0);
+	} finally {
+		productRepository.create = originalCreate;
+		console.error = originalError;
+	}
 });

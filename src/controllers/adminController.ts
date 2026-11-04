@@ -81,7 +81,10 @@ const createProductSchema = z.object({
 				.finite('Price must be a number')
 				.gt(0, 'Price must be greater than zero')
 				.max(MAX_PRODUCT_PRICE, `Price must be at most ${MAX_PRODUCT_PRICE}`)
-				.refine((price) => Math.abs(price * 100 - Math.round(price * 100)) < 1e-6, 'Price must have at most 2 decimal places'),
+				.refine(
+					(price) => Math.round(price * 100) / 100 === price,
+					'Price must have at most 2 decimal places',
+				),
 		),
 });
 
