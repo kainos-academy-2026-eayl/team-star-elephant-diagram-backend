@@ -1,9 +1,17 @@
 import argon2 from 'argon2';
-import { DASHBOARD_BY_ROLE, isAdminRole, type AdminRole } from '../models/adminRoles';
+import {
+	DASHBOARD_BY_ROLE,
+	hasPermission,
+	isAdminRole,
+	type AdminPermission,
+	type AdminResource,
+	type AdminRole,
+} from '../models/adminRoles';
 import type {
 	AdminBasketDetailsResponse,
 	AdminBasketListResponse,
 	AdminBasketSummary,
+	AdminDashboardResponse,
 	AdminUserDetailsResponse,
 	AdminUserListResponse,
 	AdminUserStatusResponse,
@@ -18,6 +26,7 @@ import type { LoginRequest } from '../validators/loginSchema';
 const ADMIN_USERS_PAGE_SIZE = 20;
 const ADMIN_BASKETS_PAGE_SIZE = 20;
 const ADMIN_USER_RECENT_ORDERS = 5;
+const DASHBOARD_NEW_USERS = 5;
 
 export class InvalidCredentialsError extends Error {
 	constructor(message = 'Invalid email or password') {
@@ -65,6 +74,28 @@ const gbp = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' 
 const formatPrice = (amount: number) => gbp.format(amount);
 const formatDate = (date: Date) => date.toISOString().slice(0, 10);
 const basketStatus = (basket: PricedBasketRecord) => (basket.itemCount > 0 ? 'Active' : 'Empty');
+
+const titleCase = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+
+// Dashboard sections and quick actions, each shown only when the role holds the permission.
+const DASHBOARD_SECTIONS = [
+	{ label: 'Users', resource: 'users', action: 'view' },
+	{ label: 'Baskets', resource: 'baskets', action: 'view' },
+	{ label: 'Orders', resource: 'orders', action: 'view' },
+	{ label: 'Inventory', resource: 'inventory', action: 'view' },
+	{ label: 'Finance', resource: 'finance', action: 'view' },
+	{ label: 'Admin accounts', resource: 'admins', action: 'manage' },
+	{ label: 'Permissions', resource: 'permissions', action: 'manage' },
+] as const satisfies readonly (AdminPermission & { label: string })[];
+
+const DASHBOARD_QUICK_ACTIONS = [
+	{ label: 'Suspend or reactivate customers', resource: 'users', action: 'suspend' },
+	{ label: 'Update order status', resource: 'orders', action: 'update' },
+	{ label: 'Add product', resource: 'inventory', action: 'create' },
+	{ label: 'Update finance records', resource: 'finance', action: 'update' },
+	{ label: 'Manage admin accounts', resource: 'admins', action: 'manage' },
+	{ label: 'Manage permissions', resource: 'permissions', action: 'manage' },
+] as const satisfies readonly (AdminPermission & { label: string })[];
 
 const toBasketSummary = (basket: PricedBasketRecord): AdminBasketSummary => ({
 	basketId: basket.basketId,
@@ -206,5 +237,56 @@ export class AdminUserService {
 		const updated = await this.users.updateStatus(userId, status);
 		if (!updated) return null;
 		return { user: { id: updated.userId, status: toAdminStatus(updated.status) } };
+	}
+
+	// Only loads and returns data the admin's role is permitted to view.
+	async getDashboard(admin: AuthenticatedAdmin): Promise<AdminDashboardResponse> {
+		const can = (resource: AdminResource, action: string) => hasPermission(admin.role, resource, action);
+		const [users, baskets, orders, inventory] = await Promise.all([
+			can('users', 'view') ? this.users.list({ skip: 0, take: DASHBOARD_NEW_USERS }) : null,
+			can('baskets', 'view') ? this.baskets.listBaskets(undefined, 1) : null,
+			can('orders', 'view') || can('finance', 'view') ? this.admins.getOrderMetrics() : null,
+			can('inventory', 'view') ? this.admins.getInventoryMetrics() : null,
+		]);
+
+		const cards: AdminDashboardResponse['cards'] = [];
+		if (users) cards.push({ label: 'Customers', value: String(users.total) });
+		if (baskets) cards.push({ label: 'Customer baskets', value: String(baskets.total) });
+		if (orders && can('orders', 'view')) {
+			cards.push({ label: 'Orders', value: String(orders.totalOrders) });
+			cards.push({ label: 'Pending orders', value: String(orders.pendingOrders) });
+		}
+		if (orders && can('finance', 'view')) cards.push({ label: 'Revenue', value: formatPrice(orders.revenue) });
+		if (inventory) {
+			cards.push({ label: 'Units in stock', value: String(inventory.unitsInStock) });
+			cards.push({ label: 'Low stock lines', value: String(inventory.lowStockLines) });
+		}
+
+		return {
+			staff: { name: `${admin.forename} ${admin.surname}` },
+			role: admin.role,
+			dashboard: admin.dashboard,
+			sections: DASHBOARD_SECTIONS.filter((s) => can(s.resource, s.action)).map(({ label }) => ({ label })),
+			quickActions: DASHBOARD_QUICK_ACTIONS.filter((a) => can(a.resource, a.action)).map(({ label }) => ({ label })),
+			cards,
+			recentOrders: can('orders', 'view')
+				? (orders?.recentOrders ?? []).map((order) => ({
+						id: order.orderId,
+						customer: order.customer,
+						date: formatDate(order.placedAt),
+						status: titleCase(order.status),
+					}))
+				: [],
+			newUsers: (users?.users ?? []).map((user) => ({
+				name: `${user.forename} ${user.surname}`,
+				email: user.email,
+				joined: formatDate(user.createdAt),
+			})),
+			stockChanges: (inventory?.recentStockChanges ?? []).map((row) => ({
+				product: row.product,
+				amount: String(row.quantity),
+				reason: `Stock level updated ${formatDate(row.modifiedAt)}`,
+			})),
+		};
 	}
 }
