@@ -19,6 +19,9 @@ export interface BasketRepository {
     // Returns productId -> quantity for the basket.
     getItems(basketId: string): Promise<ReadonlyMap<number, number>>;
     addQuantity(basketId: string, productId: number, quantity: number, maxQuantity: number): Promise<boolean>;
+    // Both return false when the product is not in the basket.
+    setQuantity(basketId: string, productId: number, quantity: number): Promise<boolean>;
+    removeItem(basketId: string, productId: number): Promise<boolean>;
     list(search: string | undefined, skip: number, take: number): Promise<BasketListResult>;
     findByBasketId(basketId: number): Promise<BasketRecord | null>;
 }
@@ -135,6 +138,7 @@ export function createDatabaseBasketRepository(prisma: PrismaClient): BasketRepo
                     return false;
                 }
 
+
                 if (existingItem) {
                     await tx.basketItem.update({
                         where: {
@@ -160,6 +164,41 @@ export function createDatabaseBasketRepository(prisma: PrismaClient): BasketRepo
                     data: { updatedAt: new Date() },
                 });
 
+                return true;
+            });
+        },
+
+        async setQuantity(basketId, productId, quantity) {
+            const userId = parseInt(basketId, 10);
+            if (!Number.isSafeInteger(userId) || userId <= 0) {
+                return false;
+            }
+
+            return prisma.$transaction(async (tx) => {
+                const { count } = await tx.basketItem.updateMany({
+                    where: { productId, basket: { userId } },
+                    data: { quantity },
+                });
+                if (count === 0) return false;
+
+                await tx.basket.update({ where: { userId }, data: { updatedAt: new Date() } });
+                return true;
+            });
+        },
+
+        async removeItem(basketId, productId) {
+            const userId = parseInt(basketId, 10);
+            if (!Number.isSafeInteger(userId) || userId <= 0) {
+                return false;
+            }
+
+            return prisma.$transaction(async (tx) => {
+                const { count } = await tx.basketItem.deleteMany({
+                    where: { productId, basket: { userId } },
+                });
+                if (count === 0) return false;
+
+                await tx.basket.update({ where: { userId }, data: { updatedAt: new Date() } });
                 return true;
             });
         },

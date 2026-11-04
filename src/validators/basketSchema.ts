@@ -13,3 +13,15 @@ export const addToBasketSchema = z.object({
 });
 
 export type AddToBasketInput = z.infer<typeof addToBasketSchema>;
+
+export const basketItemParamsSchema = z.object({
+    productId: z.coerce.number().int().positive('Product ID must be a positive number').max(2_147_483_647),
+});
+
+export const updateBasketItemSchema = z.object({
+    quantity: z.coerce
+        .number()
+        .int('Quantity must be a whole number')
+        .min(1, 'Quantity must be at least 1')
+        .max(MAX_ITEM_QUANTITY, `Quantity cannot exceed ${MAX_ITEM_QUANTITY}`),
+});

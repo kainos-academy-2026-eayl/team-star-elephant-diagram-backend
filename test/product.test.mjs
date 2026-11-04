@@ -44,6 +44,15 @@ const basketRepository = {
     baskets.set(basketId, items);
     return true;
   },
+  async setQuantity(basketId, productId, quantity) {
+    const items = baskets.get(basketId);
+    if (!items?.has(productId)) return false;
+    items.set(productId, quantity);
+    return true;
+  },
+  async removeItem(basketId, productId) {
+    return baskets.get(basketId)?.delete(productId) ?? false;
+  },
 };
 
 before(async () => {
@@ -287,4 +296,60 @@ test('GET /basket returns 401 without authentication', async () => {
   const response = await fetch(`${baseUrl}/basket`);
   assert.equal(response.status, 401);
   assert.deepEqual(await response.json(), { error: 'Authentication required' });
+});
+
+function changeBasketItem(method, productId, body, token = customerToken) {
+  return fetch(`${baseUrl}/basket/items/${productId}`, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: ['Bearer', token].join(' ') } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+test('PATCH /basket/items/:productId sets the item quantity', async () => {
+  await addToBasket({ productId: 1, quantity: 2 });
+  await addToBasket({ productId: 3, quantity: 1 });
+
+  const response = await changeBasketItem('PATCH', 1, { quantity: 5 });
+
+  assert.equal(response.status, 200);
+  const basket = await response.json();
+  assert.deepEqual(basket.items.map(({ productId, quantity }) => ({ productId, quantity })), [
+    { productId: 1, quantity: 5 },
+    { productId: 3, quantity: 1 },
+  ]);
+  assert.equal(basket.subtotal, 2599.94);
+});
+
+test('PATCH /basket/items/:productId rejects invalid quantities and unknown items', async () => {
+  await addToBasket({ productId: 1, quantity: 2 });
+  for (const quantity of [0, -1, 1.5, 100, 'abc', undefined]) {
+    const response = await changeBasketItem('PATCH', 1, { quantity });
+    assert.equal(response.status, 400, String(quantity));
+  }
+  assert.equal((await changeBasketItem('PATCH', 'abc', { quantity: 1 })).status, 400);
+  assert.equal((await changeBasketItem('PATCH', 3, { quantity: 1 })).status, 404);
+  assert.equal(baskets.get('1').get(1), 2);
+});
+
+test('DELETE /basket/items/:productId removes the item', async () => {
+  await addToBasket({ productId: 1, quantity: 2 });
+  await addToBasket({ productId: 3, quantity: 1 });
+
+  const response = await changeBasketItem('DELETE', 1);
+
+  assert.equal(response.status, 200);
+  const basket = await response.json();
+  assert.deepEqual(basket.items.map((item) => item.productId), [3]);
+  assert.equal(basket.subtotal, 849.99);
+  assert.equal((await changeBasketItem('DELETE', 1)).status, 404);
+  assert.equal((await changeBasketItem('DELETE', 0)).status, 400);
+});
+
+test('basket item changes require a logged-in customer', async () => {
+  assert.equal((await changeBasketItem('PATCH', 1, { quantity: 1 }, null)).status, 401);
+  assert.equal((await changeBasketItem('DELETE', 1, undefined, 'not-a-token')).status, 401);
 });

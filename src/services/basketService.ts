@@ -6,6 +6,12 @@ import { ProductNotFoundError } from './productService';
 
 export class BasketQuantityError extends Error { }
 
+export class BasketItemNotFoundError extends Error {
+    constructor(productId: number) {
+        super(`Product ${productId} is not in the basket`);
+    }
+}
+
 type BasketProduct = Awaited<ReturnType<ProductRepository['findByIds']>>[number];
 
 export interface PricedBasketRecord extends Omit<BasketRecord, 'items'> {
@@ -31,6 +37,23 @@ export class BasketService {
             throw new BasketQuantityError(`Quantity cannot exceed ${MAX_ITEM_QUANTITY}`);
         }
 
+        return this.getBasket(userId);
+    }
+
+    async updateItemQuantity(userId: number, productId: number, quantity: number): Promise<Basket> {
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_ITEM_QUANTITY) {
+            throw new BasketQuantityError(`Quantity must be between 1 and ${MAX_ITEM_QUANTITY}`);
+        }
+        if (!(await this.baskets.setQuantity(String(userId), productId, quantity))) {
+            throw new BasketItemNotFoundError(productId);
+        }
+        return this.getBasket(userId);
+    }
+
+    async removeItem(userId: number, productId: number): Promise<Basket> {
+        if (!(await this.baskets.removeItem(String(userId), productId))) {
+            throw new BasketItemNotFoundError(productId);
+        }
         return this.getBasket(userId);
     }
 
