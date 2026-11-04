@@ -84,10 +84,15 @@ same-site paths such as `/images/TeamB-tshirt-front.png`, served by the frontend
 from `src/pages/images`; each product lists all of its views (front, back,
 detail) as gallery images, with the first used as the main image.
 
-Products are matched by name: new products are created with a stock row, and
-existing products with the same name are updated and have their gallery images
-replaced. Products not in the seed are left unchanged. The existing user seed is
-preserved.
+Products are matched by name: new products are created, and existing products
+with the same name are updated and have their gallery images replaced. Products
+not in the seed are left unchanged. The existing user seed is preserved.
+
+The seed also creates the fictional supplier "Elephant Wholesale Ltd"
+([prisma/suppliers.ts](prisma/suppliers.ts)) and links every seeded product to
+it. Any seeded product without an inventory row gets starting stock (quantity
+50, maximum 100, reorder level 10); existing stock levels are never changed, so
+re-running the seed is safe.
 
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
 
