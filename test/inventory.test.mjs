@@ -21,7 +21,7 @@ test('inventory validation enforces JSON integers, bounds, reason and strict bod
 	for (const adjustment of [undefined, null, '1', 1.1, NaN, Infinity, 2_147_483_648, -2_147_483_648]) {
 		assert.equal(stockAdjustmentSchema.safeParse({ adjustment, reason: 'Stock count' }).success, false);
 	}
-	for (const reason of [undefined, null, '', '  a  ', 'a'.repeat(256)]) {
+	for (const reason of [undefined, null, '', '  a  ', '💥a', 'a'.repeat(256)]) {
 		assert.equal(stockAdjustmentSchema.safeParse({ adjustment: 1, reason }).success, false);
 	}
 	for (const lowStockThreshold of [undefined, null, '1', -1, 0.1, 2_147_483_648]) {
@@ -30,6 +30,7 @@ test('inventory validation enforces JSON integers, bounds, reason and strict bod
 	assert.equal(thresholdSchema.parse({ lowStockThreshold: 0 }).lowStockThreshold, 0);
 	assert.deepEqual(stockAdjustmentSchema.parse({ adjustment: -4, reason: ' Damaged ', notes: 'Box' }),
 		{ adjustment: -4, reason: 'Damaged', notes: 'Box' });
+	assert.equal(stockAdjustmentSchema.parse({ adjustment: 1, reason: '💥ab' }).reason, '💥ab');
 	assert.equal(stockAdjustmentSchema.safeParse({ adjustment: 1, reason: 'Count', adjustedById: 99 }).success, false);
 	assert.equal(stockAdjustmentSchema.safeParse({ adjustment: 0, reason: 'Count' }).success, true);
 	assert.equal(stockAdjustmentSchema.safeParse({ adjustment: 1, reason: 'Count', notes: 5 }).success, false);
@@ -259,6 +260,23 @@ test('routes validate before invoking services and return JSON errors', async ()
 		body: '{',
 	});
 	assert.equal(malformed.status, 400);
+});
+
+test('inventory read routes support HEAD and stock adjustment validation follows the matched route', async () => {
+	for (const path of ['', '/1', '/1/history']) {
+		const before = calls.length;
+		const response = await request(path, { id: 1, method: 'HEAD' });
+		assert.equal(response.status, 200, path);
+		assert.equal(await response.text(), '');
+		assert.equal(calls.length, before + 1);
+	}
+	for (const path of ['/1/stock/', '/1/STOCK']) {
+		const before = calls.length;
+		const response = await request(path, { id: 1, method: 'PATCH', body: { adjustment: 1, reason: 'Count' } });
+		assert.equal(response.status, 200, path);
+		assert.equal(calls.length, before + 1);
+		assert.equal(calls.at(-1)[0], 'adjustStock');
+	}
 });
 
 test('router forwards unexpected authentication failures to its error handler', async () => {

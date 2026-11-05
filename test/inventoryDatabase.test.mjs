@@ -4,7 +4,10 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { InventoryService } from '../src/services/inventoryService.ts';
+import { createCheckoutReservation } from '../src/services/reservationService.ts';
 import { TokenService } from '../src/services/tokenService.ts';
+
+process.env.JWT_SECRET = 'test-customer-secret-at-least-32-bytes';
 
 test('PostgreSQL inventory: adjustments, synchronization, history, atomic rollback and concurrency', {
 	skip: !process.env.INVENTORY_TEST_DATABASE_URL,
@@ -17,6 +20,7 @@ test('PostgreSQL inventory: adjustments, synchronization, history, atomic rollba
 	const suffix = randomUUID();
 	const productIds = [];
 	let admin;
+	let customer;
 	let supplier;
 	let secondary;
 	const makeProduct = async (quantity = 20, threshold = 5, extra = {}) => {
@@ -234,6 +238,40 @@ test('PostgreSQL inventory: adjustments, synchronization, history, atomic rollba
 			assert.equal((await service.getAdjustmentHistory(productId)).totalItems, 3);
 		});
 
+		await t.test('concurrent checkout reservations and stock removals cannot over-reserve', async () => {
+			const { productId, inventoryId } = await makeProduct(10);
+			customer = await db.user.create({ data: {
+				forename: 'Checkout', surname: 'Test', email: `checkout-${suffix}@example.com`,
+				passwordHash: 'not-a-real-password', addressLine1: 'Test', addressLine2: '',
+				city: 'Test', postcode: 'TE1 1ST',
+			} });
+			await db.basket.create({ data: { userId: customer.userId, items: { create: { productId, quantity: 5 } } } });
+
+			await assert.rejects(
+				db.inventory.update({ where: { inventoryId }, data: { reservedQuantity: 11 } }),
+				(error) => error.code === 'P2004',
+			);
+			const results = await Promise.allSettled([
+				createCheckoutReservation(customer.userId, db),
+				service.adjustStock(productId, -8, 'Count', undefined, admin.adminId),
+			]);
+			assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+			const [reservation, removal] = results;
+			const inventory = await db.inventory.findUniqueOrThrow({ where: { inventoryId } });
+			assert.ok(inventory.reservedQuantity <= inventory.quantity);
+			if (reservation.status === 'fulfilled') {
+				assert.equal(removal.status, 'rejected');
+				assert.equal(removal.reason.status, 400);
+				assert.equal(inventory.quantity, 10);
+				assert.equal(inventory.reservedQuantity, 5);
+			} else {
+				assert.equal(reservation.reason.status, 409);
+				assert.equal(removal.status, 'fulfilled');
+				assert.equal(inventory.quantity, 2);
+				assert.equal(inventory.reservedQuantity, 0);
+			}
+		});
+
 		await t.test('concurrent checkout-style writes and staff adjustments do not lose updates', async () => {
 			const { productId, inventoryId } = await makeProduct(20);
 			for (let index = 0; index < 5; index++) {
@@ -299,6 +337,7 @@ test('PostgreSQL inventory: adjustments, synchronization, history, atomic rollba
 			}
 		});
 	} finally {
+		if (customer) await db.user.delete({ where: { userId: customer.userId } });
 		await db.stockAdjustment.deleteMany({ where: { productId: { in: productIds } } });
 		await db.inventory.deleteMany({ where: { productId: { in: productIds } } });
 		await db.productSupplier.deleteMany({ where: { productId: { in: productIds } } });

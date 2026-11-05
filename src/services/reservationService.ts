@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import prisma from '../prismaClient';
 
 export const RESERVATION_TIMEOUT_MS = 15 * 60 * 1000;
@@ -15,6 +15,13 @@ export class ReservationError extends Error {
 // A product may have several inventory rows (one per supplier); always use the lowest id so reserve/release/sell hit the same row.
 async function primaryInventory(tx: Tx, productId: number) {
   return tx.inventory.findFirst({ where: { productId }, orderBy: { inventoryId: 'asc' } });
+}
+
+async function lockPrimaryInventory(tx: Tx, productId: number) {
+  const rows = await tx.$queryRaw<{ inventoryId: number; quantity: number; reservedQuantity: number }[]>`
+    SELECT "inventory_id" AS "inventoryId", "quantity", "reserved_quantity" AS "reservedQuantity"
+    FROM "Inventory" WHERE "product_id" = ${productId} ORDER BY "inventory_id" LIMIT 1 FOR UPDATE`;
+  return rows[0] ?? null;
 }
 
 async function returnReservedStock(tx: Tx, reservationId: number) {
@@ -55,13 +62,20 @@ function isUniqueViolation(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
+function isInventoryConflict(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError
+    && (error.code === 'P2004'
+      || error.code === 'P2034'
+      || (error.code === 'P2010' && ['40001', '40P01'].includes(String(error.meta?.code))));
+}
+
 /**
  * Reserves every basket item for 15 minutes when the user continues to checkout.
  * Any previous active reservation for the user is marked CANCELLED and its stock returned.
  */
-export async function createCheckoutReservation(userId: number) {
+export async function createCheckoutReservation(userId: number, database: PrismaClient = prisma) {
   try {
-    const reservation = await prisma.$transaction(async (tx) => {
+    const reservation = await database.$transaction(async (tx) => {
       const basket = await tx.basket.findUnique({ where: { userId }, include: { items: { include: { product: true } } } });
       if (!basket || basket.items.length === 0) {
         throw new ReservationError(400, 'Basket is empty');
@@ -72,8 +86,8 @@ export async function createCheckoutReservation(userId: number) {
         await releaseReservation(tx, existing.reservationId, 'CANCELLED');
       }
 
-      for (const item of basket.items) {
-        const inventory = await primaryInventory(tx, item.productId);
+      for (const item of [...basket.items].sort((a, b) => a.productId - b.productId)) {
+        const inventory = await lockPrimaryInventory(tx, item.productId);
         const available = inventory ? inventory.quantity - inventory.reservedQuantity : 0;
         if (!inventory || available < item.quantity) {
           throw new ReservationError(
@@ -95,7 +109,7 @@ export async function createCheckoutReservation(userId: number) {
         },
         include: { items: { include: { product: true } } },
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return {
       success: true,
@@ -106,6 +120,9 @@ export async function createCheckoutReservation(userId: number) {
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw new ReservationError(409, 'Checkout is already in progress. Please try again.');
+    }
+    if (isInventoryConflict(error)) {
+      throw new ReservationError(409, 'Inventory changed concurrently; please try again.');
     }
     throw error;
   }

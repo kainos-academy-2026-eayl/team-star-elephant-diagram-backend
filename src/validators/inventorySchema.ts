@@ -8,7 +8,7 @@ export const RECENT_ADJUSTMENTS_LIMIT = 20;
 const stockInteger = z.number().int().min(-MAX_STOCK).max(MAX_STOCK);
 export const stockAdjustmentSchema = z.strictObject({
 	adjustment: stockInteger,
-	reason: z.string().trim().min(3).max(255),
+	reason: z.string().trim().min(3).max(255).refine((value) => [...value].length >= 3),
 	notes: z.string().optional(),
 });
 export const thresholdSchema = z.strictObject({

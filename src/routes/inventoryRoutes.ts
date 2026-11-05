@@ -20,10 +20,10 @@ const validate: RequestHandler = (req, res, next) => {
 		input.create = inventoryCreateSchema.parse(req.body);
 	} else if (req.method === 'PUT') {
 		input.update = inventoryUpdateSchema.parse(req.body);
-	} else if (req.method === 'GET') {
+	} else if (req.method === 'GET' || req.method === 'HEAD') {
 		if (req.params.id === undefined) input.query = inventoryQuerySchema.parse(req.query);
 		else input.pagination = inventoryPaginationSchema.parse(req.query);
-	} else if (req.path.endsWith('/stock')) {
+	} else if (req.route?.path === '/:id/stock') {
 		input.adjustment = stockAdjustmentSchema.parse(req.body);
 	} else {
 		input.threshold = thresholdSchema.parse(req.body);

@@ -50,7 +50,10 @@ ALTER TABLE "Product"
     ADD CONSTRAINT "Product_stockQuantity_nonnegative" CHECK ("stockQuantity" >= 0),
     ADD CONSTRAINT "Product_lowStockThreshold_nonnegative" CHECK ("lowStockThreshold" >= 0);
 ALTER TABLE "Inventory"
-    ADD CONSTRAINT "Inventory_quantity_nonnegative" CHECK ("quantity" >= 0);
+    ADD CONSTRAINT "Inventory_quantity_nonnegative" CHECK ("quantity" >= 0),
+    ADD CONSTRAINT "Inventory_reserved_quantity_valid" CHECK (
+        "reserved_quantity" >= 0 AND "reserved_quantity" <= "quantity"
+    );
 ALTER TABLE "StockAdjustment"
     ADD CONSTRAINT "StockAdjustment_balanced" CHECK (
         "previousStock" >= 0 AND "newStock" >= 0
