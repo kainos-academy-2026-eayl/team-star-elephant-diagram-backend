@@ -50,8 +50,8 @@ model User {
   status         UserStatus      @default(ACTIVE)
   orders         Order[]
   paymentDetails PaymentDetail[]
-  basket         Basket?
-  reservations   Reservation[]
+  basket        Basket?
+  reservations  Reservation[]
 }
 
 model Product {
