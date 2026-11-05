@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express';
-import type { ReservationService } from '../services/reservationService';
+import type { ReservationService } from '../services/checkoutReservationService';
 import type { TokenService } from '../services/tokenService';
-import { ReservationError, InsufficientInventoryError } from '../services/reservationService';
+import { ReservationError, InsufficientInventoryError } from '../services/checkoutReservationService';
 
 export function createCheckoutRouter(
 	reservationService: ReservationService,

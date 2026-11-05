@@ -6,24 +6,44 @@ export interface ReservationRecord {
 	userId: number;
 	createdAt: Date;
 	updatedAt: Date;
+	expiresAt: Date;
 	items: Map<number, number>; // productId -> quantity
 }
 
 export interface ReservationRepository {
-	create(userId: number): Promise<number>;
+	create(userId: number, expiresAt: Date): Promise<number>;
 	addItem(reservationId: number, productId: number, quantity: number): Promise<boolean>;
 	findByUserId(userId: number): Promise<ReservationRecord | null>;
 	findByReservationId(reservationId: number): Promise<ReservationRecord | null>;
 	delete(reservationId: number): Promise<boolean>;
-	findExpired(expirationMinutes: number): Promise<ReservationRecord[]>;
+	findExpired(now?: Date): Promise<ReservationRecord[]>;
+}
+
+function toRecord(reservation: {
+	reservationId: number;
+	userId: number;
+	createdAt: Date;
+	updatedAt: Date;
+	expiresAt: Date;
+	items: { productId: number; quantity: number }[];
+}): ReservationRecord {
+	return {
+		reservationId: reservation.reservationId,
+		userId: reservation.userId,
+		createdAt: reservation.createdAt,
+		updatedAt: reservation.updatedAt,
+		expiresAt: reservation.expiresAt,
+		items: new Map(reservation.items.map((item) => [item.productId, item.quantity])),
+	};
 }
 
 export function createDatabaseReservationRepository(prisma: PrismaClient): ReservationRepository {
 	return {
-		async create(userId: number): Promise<number> {
+		async create(userId: number, expiresAt: Date): Promise<number> {
 			const reservation = await prisma.reservation.create({
 				data: {
 					userId,
+					expiresAt,
 				},
 			});
 			return reservation.reservationId;
@@ -55,19 +75,11 @@ export function createDatabaseReservationRepository(prisma: PrismaClient): Reser
 
 		async findByUserId(userId: number): Promise<ReservationRecord | null> {
 			const reservation = await prisma.reservation.findFirst({
-				where: { userId },
+				where: { userId, status: 'ACTIVE' },
 				include: { items: true },
 			});
 
-			if (!reservation) return null;
-
-			return {
-				reservationId: reservation.reservationId,
-				userId: reservation.userId,
-				createdAt: reservation.createdAt,
-				updatedAt: reservation.updatedAt,
-				items: new Map(reservation.items.map((item) => [item.productId, item.quantity])),
-			};
+			return reservation ? toRecord(reservation) : null;
 		},
 
 		async findByReservationId(reservationId: number): Promise<ReservationRecord | null> {
@@ -76,15 +88,7 @@ export function createDatabaseReservationRepository(prisma: PrismaClient): Reser
 				include: { items: true },
 			});
 
-			if (!reservation) return null;
-
-			return {
-				reservationId: reservation.reservationId,
-				userId: reservation.userId,
-				createdAt: reservation.createdAt,
-				updatedAt: reservation.updatedAt,
-				items: new Map(reservation.items.map((item) => [item.productId, item.quantity])),
-			};
+			return reservation ? toRecord(reservation) : null;
 		},
 
 		async delete(reservationId: number): Promise<boolean> {
@@ -98,24 +102,18 @@ export function createDatabaseReservationRepository(prisma: PrismaClient): Reser
 			}
 		},
 
-		async findExpired(expirationMinutes: number): Promise<ReservationRecord[]> {
-			const expirationTime = new Date(Date.now() - expirationMinutes * 60 * 1000);
+		async findExpired(now: Date = new Date()): Promise<ReservationRecord[]> {
 			const reservations = await prisma.reservation.findMany({
 				where: {
-					createdAt: {
-						lt: expirationTime,
+					status: 'ACTIVE',
+					expiresAt: {
+						lte: now,
 					},
 				},
 				include: { items: true },
 			});
 
-			return reservations.map((reservation) => ({
-				reservationId: reservation.reservationId,
-				userId: reservation.userId,
-				createdAt: reservation.createdAt,
-				updatedAt: reservation.updatedAt,
-				items: new Map(reservation.items.map((item) => [item.productId, item.quantity])),
-			}));
+			return reservations.map(toRecord);
 		},
 	};
 }

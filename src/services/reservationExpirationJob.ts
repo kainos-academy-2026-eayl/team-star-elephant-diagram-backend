@@ -1,4 +1,4 @@
-import type { ReservationService } from './reservationService';
+import type { ReservationService } from './checkoutReservationService';
 
 export class ReservationExpirationJob {
 	private intervalId: NodeJS.Timeout | null = null;

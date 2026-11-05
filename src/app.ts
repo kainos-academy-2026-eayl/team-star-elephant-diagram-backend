@@ -19,7 +19,7 @@ import { adminController } from './controllers/adminController';
 import { BasketService } from './services/basketService';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
-import { ReservationService } from './services/reservationService';
+import { ReservationService } from './services/checkoutReservationService';
 import { OrderService } from './services/orderService';
 import { ReservationExpirationJob } from './services/reservationExpirationJob';
 import { userController } from './controllers/userController';
