@@ -1,5 +1,5 @@
 import argon2 from 'argon2';
-import type { CreatedUser, User } from '../models/user';
+import type { CreatedUser, User, ShippingAddress } from '../models/user';
 import type { UserRepository } from '../repositories/userRepository';
 import type { RegisterInput } from '../validators/registerSchema';
 import type { LoginRequest } from '../validators/loginSchema';
@@ -69,6 +69,10 @@ export class UserService {
 	async findById(userId: number): Promise<User | null> {
 		const user = await this.users.findById(userId);
 		return user?.status === 'SUSPENDED' ? null : user;
+	}
+
+	async updateShippingAddress(userId: number, address: ShippingAddress): Promise<Pick<User, 'userId' | 'addressLine1' | 'addressLine2' | 'city' | 'postcode'> | null> {
+		return this.users.updateShippingAddress(userId, address);
 	}
 
 	async login(data: LoginRequest): Promise<string> {
