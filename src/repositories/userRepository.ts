@@ -36,6 +36,7 @@ export interface UserRepository {
   list(query: UserListQuery): Promise<UserListResult>;
   findRecentOrders(userId: number, take: number): Promise<UserOrderRecord[]>;
   updateStatus(userId: number, status: UserStatus): Promise<Pick<User, 'userId' | 'status'> | null>;
+  delete(userId: number): Promise<boolean>;
 }
 
 const userSummarySelect = { userId: true, forename: true, surname: true, email: true, createdAt: true, status: true } as const;
@@ -55,6 +56,23 @@ function searchFilter(search: string | undefined): Prisma.UserWhereInput {
 }
 
 export const prismaUserRepository: UserRepository = {
+  async delete(userId) {
+    return prisma.$transaction(async (tx) => {
+      // Lock the customer before deleting dependants to block concurrent foreign-key inserts.
+      const users = await tx.$queryRaw<{ userId: number }[]>`
+        SELECT "userId" FROM "User" WHERE "userId" = ${userId} FOR UPDATE
+      `;
+      if (users.length === 0) return false;
+      await tx.orderItem.deleteMany({ where: { order: { userId } } });
+      await tx.order.deleteMany({ where: { userId } });
+      await tx.paymentDetail.deleteMany({ where: { userId } });
+      // Basket items cascade when their basket is removed.
+      await tx.basket.deleteMany({ where: { userId } });
+      await tx.refreshSession.deleteMany({ where: { principalId: userId, principalKind: 'customer' } });
+      await tx.user.delete({ where: { userId } });
+      return true;
+    });
+  },
   findById(userId) {
     return prisma.user.findUnique({ where: { userId } });
   },

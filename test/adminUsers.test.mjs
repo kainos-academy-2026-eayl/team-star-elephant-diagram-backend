@@ -17,6 +17,7 @@ const tokens = new TokenService(
 
 const users = new Map();
 const orders = [];
+const refreshSessions = memoryRefreshSessions();
 const matches = (user, search) =>
 	(search ?? '')
 		.trim()
@@ -56,6 +57,19 @@ const userRepository = {
 		if (!user) return null;
 		user.status = status;
 		return { userId, status };
+	},
+	async delete(userId) {
+		if (!users.delete(userId)) return false;
+		for (let index = orders.length - 1; index >= 0; index--) {
+			if (orders[index].userId === userId) orders.splice(index, 1);
+		}
+		for (const [id, basket] of baskets) {
+			if (basket.userId === userId) baskets.delete(id);
+		}
+		for (const [id, session] of refreshSessions.rows) {
+			if (session.principalId === userId && session.principalKind === 'customer') refreshSessions.rows.delete(id);
+		}
+		return true;
 	},
 };
 const admins = new Map();
@@ -187,6 +201,7 @@ let adminToken;
 let passwordHash;
 let productRequestIp = 0;
 let adminRequestIp = 0;
+let testRequestIp = 0;
 before(async () => {
 	passwordHash = await argon2.hash('correct-horse', ARGON2_OPTIONS);
 	adminToken = await tokens.signAccessToken({ adminId: 1, role: 'SuperAdmin' });
@@ -196,7 +211,7 @@ before(async () => {
 		productRepository,
 		basketRepository,
 		tokenService: tokens,
-		refreshSessionRepository: memoryRefreshSessions(),
+		refreshSessionRepository: refreshSessions,
 		authRateLimitOptions: { limit: 1000 },
 		trustedProxyAddresses: ['127.0.0.1'],
 	}).listen(0, '127.0.0.1');
@@ -222,11 +237,13 @@ const customer = (userId, forename, surname, email, overrides = {}) => ({
 });
 
 beforeEach(() => {
+	testRequestIp++;
 	for (const productId of products.keys()) {
 		if (productId > 2) products.delete(productId);
 	}
 	productCreateCalls.length = 0;
 	users.clear();
+	refreshSessions.rows.clear();
 	admins.clear();
 	admins.set(1, { adminId: 1, forename: 'Test', surname: 'Admin', email: 'admin@example.com', role: 'SuperAdmin' });
 	orders.length = 0;
@@ -262,7 +279,10 @@ beforeEach(() => {
 const _request = (method, path, token = adminToken) =>
 	fetch(`${url}${path}`, {
 		method,
-		headers: token ? { authorization: `Bearer ${token}` } : {},
+		headers: {
+			'x-forwarded-for': `198.51.100.${testRequestIp}`,
+			...(token ? { authorization: `Bearer ${token}` } : {}),
+		},
 	});
 const requestWithUniqueIp = (method, path, token = adminToken, body) => {
 	const requestIp = ++adminRequestIp;
@@ -379,11 +399,45 @@ test('admin user endpoints return 404 for unknown or malformed ids', async () =>
 			['GET', `/admin/users/${id}`],
 			['POST', `/admin/users/${id}/suspend`],
 			['POST', `/admin/users/${id}/reactivate`],
+			['POST', `/admin/users/${id}/delete`],
 		]) {
 			const response = await requestWithUniqueIp(method, path);
 			assert.equal(response.status, 404, `${method} ${path}`);
 			assert.deepEqual(await response.json(), { error: 'User not found' });
 		}
+	}
+});
+
+test('permanent deletion removes the customer and rejects login, refresh and existing access', async () => {
+	const login = await customerLogin();
+	const credentials = await login.json();
+	const cookie = login.headers.getSetCookie()[0].split(';', 1)[0];
+	const response = await post('/admin/users/1/delete');
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { deleted: true });
+	assert.equal(users.has(1), false);
+	assert.equal(orders.some((order) => order.userId === 1), false);
+	assert.equal([...refreshSessions.rows.values()].some((session) => session.principalId === 1), false);
+	assert.equal(users.has(2), true);
+	assert.equal(orders.some((order) => order.userId === 2), true);
+	assert.equal((await get('/admin/users/1')).status, 404);
+	assert.equal((await post('/admin/users/1/delete')).status, 404);
+	assert.equal((await customerLogin()).status, 401);
+	assert.equal((await get('/profile', credentials.accessToken)).status, 401);
+	const refresh = await fetch(`${url}/auth/refresh`, { method: 'POST', headers: { cookie } });
+	assert.equal(refresh.status, 401);
+});
+
+test('permanent deletion returns an explicit error on repository failure', async () => {
+	const original = userRepository.delete;
+	userRepository.delete = async () => { throw new Error('db down'); };
+	try {
+		const response = await post('/admin/users/1/delete');
+		assert.equal(response.status, 500);
+		assert.match((await response.json()).error, /could not be deleted/);
+		assert.equal(users.has(1), true);
+	} finally {
+		userRepository.delete = original;
 	}
 });
 
@@ -449,6 +503,7 @@ test('admin user endpoints require an admin access token', async () => {
 			['GET', '/admin/users/1'],
 			['POST', '/admin/users/1/suspend'],
 			['POST', '/admin/users/3/reactivate'],
+			['POST', '/admin/users/1/delete'],
 		]) {
 			const response = await fetch(`${url}${path}`, {
 				method,

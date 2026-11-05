@@ -23,7 +23,18 @@ export interface RefreshSessionRepository {
 
 export const prismaRefreshSessionRepository: RefreshSessionRepository = {
 	async create(session) {
-		await prisma.refreshSession.create({ data: session });
+		if (session.principalKind !== 'customer') {
+			await prisma.refreshSession.create({ data: session });
+			return;
+		}
+		await prisma.$transaction(async (tx) => {
+			// Share the customer's deletion lock so login cannot leave orphaned sessions.
+			const users = await tx.$queryRaw<{ userId: number }[]>`
+				SELECT "userId" FROM "User" WHERE "userId" = ${session.principalId} FOR KEY SHARE
+			`;
+			if (users.length === 0) throw new Error('Cannot create a session for a deleted customer');
+			await tx.refreshSession.create({ data: session });
+		});
 	},
 	findById(id) {
 		return prisma.refreshSession.findUnique({ where: { id } });

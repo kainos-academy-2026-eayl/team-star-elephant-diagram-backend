@@ -34,7 +34,7 @@ export type ResourcePermissions = { readonly [R in AdminResource]?: readonly Adm
 // Role -> Resource -> Action. Unlisted resources/actions are denied. SuperAdmin bypasses this table.
 export const ROLE_PERMISSIONS: Readonly<Record<Exclude<AdminRole, 'SuperAdmin'>, ResourcePermissions>> = {
     Admin: {
-        users: ['view', 'suspend', 'reactivate'],
+        users: ['view', 'delete', 'suspend', 'reactivate'],
         baskets: ['view'],
         orders: ['view', 'update'],
         inventory: ['view'],
@@ -51,9 +51,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<Exclude<AdminRole, 'SuperAdmin'>,
         orders: ['view'],
     },
     FinanceManager: {
-        finance: ['view', 'update'],
-        orders: ['view'],
-        inventory: ['view'],
+        finance: ['view'],
     },
 };
 

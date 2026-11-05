@@ -283,6 +283,24 @@ export function adminController(
 		},
 	);
 
+	router.post(
+		'/admin/users/:id/delete',
+		...authorize('users', 'delete'),
+		async (req: Request, res: Response) => {
+			const userId = userIdSchema.safeParse(req.params.id);
+			try {
+				if (!userId.success || !(await adminService.deleteUser(userId.data))) {
+					res.status(404).json({ error: 'User not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json({ deleted: true });
+			} catch (error) {
+				console.error('Admin user deletion failed', error);
+				res.status(500).json({ error: 'The customer could not be deleted. Please try again.' });
+			}
+		},
+	);
+
 	for (const [action, status] of [
 		['suspend', 'SUSPENDED'],
 		['reactivate', 'ACTIVE'],

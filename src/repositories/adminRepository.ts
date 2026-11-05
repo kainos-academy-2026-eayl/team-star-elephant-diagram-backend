@@ -50,6 +50,7 @@ export interface AdminOrderMetrics {
 export interface AdminInventoryMetrics {
 	unitsInStock: number;
 	lowStockLines: number;
+	lowStockItems: Array<{ inventoryId: number; product: string; supplier: string; quantity: number; reorderLevel: number }>;
 	recentStockChanges: Array<{ product: string; quantity: number; modifiedAt: Date }>;
 }
 
@@ -132,7 +133,7 @@ export const prismaAdminUserRepository: adminRepository = {
 		};
 	},
 	async getInventoryMetrics() {
-		const [stock, lowStockLines, recent] = await prisma.$transaction([
+		const [stock, lowStockLines, recent, lowStock] = await prisma.$transaction([
 			prisma.inventory.aggregate({ _sum: { quantity: true } }),
 			prisma.inventory.count({ where: { quantity: { lte: prisma.inventory.fields.reorderLevel } } }),
 			prisma.inventory.findMany({
@@ -140,10 +141,29 @@ export const prismaAdminUserRepository: adminRepository = {
 				orderBy: [{ modifiedAt: 'desc' }, { inventoryId: 'desc' }],
 				take: DASHBOARD_RECENT_ROWS,
 			}),
+			prisma.inventory.findMany({
+				where: { quantity: { lte: prisma.inventory.fields.reorderLevel } },
+				select: {
+					inventoryId: true,
+					quantity: true,
+					reorderLevel: true,
+					product: { select: { name: true } },
+					supplier: { select: { name: true } },
+				},
+				orderBy: [{ quantity: 'asc' }, { inventoryId: 'asc' }],
+				take: DASHBOARD_RECENT_ROWS,
+			}),
 		]);
 		return {
 			unitsInStock: stock._sum.quantity ?? 0,
 			lowStockLines,
+			lowStockItems: lowStock.map((row) => ({
+				inventoryId: row.inventoryId,
+				product: row.product.name,
+				supplier: row.supplier.name,
+				quantity: row.quantity,
+				reorderLevel: row.reorderLevel,
+			})),
 			recentStockChanges: recent.map((row) => ({
 				product: row.product.name,
 				quantity: row.quantity,
