@@ -21,6 +21,13 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum ReservationStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  CONVERTED
+}
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
@@ -43,8 +50,8 @@ model User {
   status         UserStatus      @default(ACTIVE)
   orders         Order[]
   paymentDetails PaymentDetail[]
-  basket        Basket?
-  reservation   Reservation?
+  basket         Basket?
+  reservations   Reservation[]
 }
 
 model Product {
@@ -101,8 +108,21 @@ model Inventory {
   product         Product  @relation(fields: [productId], references: [productId])
   supplierId      Int      @map("supplier_id")
   supplier        Supplier @relation(fields: [supplierId], references: [supplierId])
+  reservationAllocations ReservationInventoryAllocation[]
 
   @@index([reservedQuantity])
+}
+
+model ReservationInventoryAllocation {
+  allocationId      Int             @id @default(autoincrement()) @map("allocation_id")
+  reservationItemId Int             @map("reservation_item_id")
+  reservationItem   ReservationItem @relation(fields: [reservationItemId], references: [reservationItemId], onDelete: Cascade)
+  inventoryId       Int             @map("inventory_id")
+  inventory         Inventory       @relation(fields: [inventoryId], references: [inventoryId], onDelete: Restrict)
+  quantity          Int
+
+  @@unique([reservationItemId, inventoryId])
+  @@index([inventoryId])
 }
 
 model Order {
@@ -110,10 +130,12 @@ model Order {
   orderPlacedAt DateTime    @default(now()) @map("order_placed_at")
   orderStatus   OrderStatus @default(PENDING) @map("order_status")
   cost          Decimal     @map("cost") @db.Decimal(10, 2)
+  shippingFee   Decimal     @default(20.00) @map("shipping_fee") @db.Decimal(10, 2)
   modifiedAt    DateTime    @default(now()) @updatedAt @map("modified_at")
   userId        Int
   user          User        @relation(fields: [userId], references: [userId])
   orderItems    OrderItem[]
+  reservation   Reservation?
 
   @@index([orderStatus])
 }
@@ -140,6 +162,7 @@ model OrderItem {
   orderId   Int
   productId Int
   quantity  Int     @default(1)
+  unitPrice Decimal @map("unit_price") @db.Decimal(10, 2)
   order     Order   @relation(fields: [orderId], references: [orderId])
   product   Product @relation(fields: [productId], references: [productId])
 
@@ -188,16 +211,25 @@ model ProductImage {
   @@unique([productId, position])
 }
 
+
+// Reservations are kept as history; only one ACTIVE reservation per user is allowed
+// (enforced by the partial unique index "Reservation_userId_active_key" in migration 20261105100000).
 model Reservation {
-  reservationId  Int       @id @unique @default(autoincrement()) @map("reservation_id")
-  userId         Int       @unique
-  user           User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  reservationId  Int               @id @unique @default(autoincrement()) @map("reservation_id")
+  userId         Int
+  user           User              @relation(fields: [userId], references: [userId], onDelete: Cascade)
   items          ReservationItem[]
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
-  expiresAt      DateTime  @map("expiresAt")
+  status         ReservationStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
+  expiresAt      DateTime          @map("expiresAt")
+  releasedAt     DateTime?         @map("released_at")
+  orderId        Int?              @unique @map("order_id")
+  order          Order?            @relation(fields: [orderId], references: [orderId], onDelete: SetNull)
 
   @@index([expiresAt])
+  @@index([status, expiresAt])
+  @@index([userId, status])
 }
 
 model ReservationItem {
@@ -208,7 +240,7 @@ model ReservationItem {
   product      Product @relation(fields: [productId], references: [productId])
   quantity     Int
   createdAt    DateTime @default(now()) @map("created_at")
+  inventoryAllocations ReservationInventoryAllocation[]
 
   @@unique([reservationId, productId])
 }
-

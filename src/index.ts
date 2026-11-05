@@ -25,6 +25,9 @@ const server = app.listen(PORT, HOST, () => {
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
+    if (app.reservationExpirationJob) {
+      app.reservationExpirationJob.stop();
+    }
     server.close(() => process.exit(0));
   });
 }

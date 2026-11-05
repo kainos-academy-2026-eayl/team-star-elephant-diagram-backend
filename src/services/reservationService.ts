@@ -1,336 +1,254 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import prisma from '../prismaClient';
 
-const prisma = new PrismaClient();
+export const RESERVATION_TIMEOUT_MS = 15 * 60 * 1000;
 
-// 15 minutes in milliseconds
-const RESERVATION_TIMEOUT_MS = 15 * 60 * 1000;
+type Tx = Prisma.TransactionClient;
+type ReleaseStatus = 'EXPIRED' | 'CANCELLED';
+
+export class ReservationError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+// A product may have several inventory rows (one per supplier); always use the lowest id so reserve/release/sell hit the same row.
+async function primaryInventory(tx: Tx, productId: number) {
+  return tx.inventory.findFirst({ where: { productId }, orderBy: { inventoryId: 'asc' } });
+}
+
+async function returnReservedStock(tx: Tx, reservationId: number) {
+  const items = await tx.reservationItem.findMany({ where: { reservationId } });
+  for (const item of items) {
+    const inventory = await primaryInventory(tx, item.productId);
+    if (!inventory) continue;
+    await tx.inventory.update({
+      where: { inventoryId: inventory.inventoryId },
+      data: { reservedQuantity: Math.max(0, inventory.reservedQuantity - item.quantity) },
+    });
+  }
+}
 
 /**
- * Creates a reservation from a basket when user proceeds to checkout
- * Reduces inventory reserved quantity
+ * Moves an ACTIVE reservation to EXPIRED/CANCELLED and returns its stock. The reservation row is kept as history.
+ * The status check makes this safe to race with payment or another cleanup: stock is only ever returned once.
+ */
+async function releaseReservation(tx: Tx, reservationId: number, status: ReleaseStatus, onlyIfExpired = false) {
+  const now = new Date();
+  const { count } = await tx.reservation.updateMany({
+    where: { reservationId, status: 'ACTIVE', ...(onlyIfExpired ? { expiresAt: { lte: now } } : {}) },
+    data: { status, releasedAt: now },
+  });
+  if (count === 0) return false;
+  await returnReservedStock(tx, reservationId);
+  return true;
+}
+
+async function findActiveReservation(tx: Tx, userId: number) {
+  return tx.reservation.findFirst({
+    where: { userId, status: 'ACTIVE' },
+    include: { items: { include: { product: true } } },
+  });
+}
+
+function isUniqueViolation(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+/**
+ * Reserves every basket item for 15 minutes when the user continues to checkout.
+ * Any previous active reservation for the user is marked CANCELLED and its stock returned.
  */
 export async function createCheckoutReservation(userId: number) {
   try {
-    // Get user's basket with all items
-    const basket = await prisma.basket.findUnique({
-      where: { userId },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: {
-                inventory: {
-                  include: { supplier: true }
-                }
-              }
-            }
-          }
+    const reservation = await prisma.$transaction(async (tx) => {
+      const basket = await tx.basket.findUnique({ where: { userId }, include: { items: { include: { product: true } } } });
+      if (!basket || basket.items.length === 0) {
+        throw new ReservationError(400, 'Basket is empty');
+      }
+
+      const existing = await tx.reservation.findFirst({ where: { userId, status: 'ACTIVE' }, select: { reservationId: true } });
+      if (existing) {
+        await releaseReservation(tx, existing.reservationId, 'CANCELLED');
+      }
+
+      for (const item of basket.items) {
+        const inventory = await primaryInventory(tx, item.productId);
+        const available = inventory ? inventory.quantity - inventory.reservedQuantity : 0;
+        if (!inventory || available < item.quantity) {
+          throw new ReservationError(
+            409,
+            `Insufficient stock for ${item.product.name}. Available: ${Math.max(0, available)}, Requested: ${item.quantity}`,
+          );
         }
-      }
-    });
-
-    if (!basket || basket.items.length === 0) {
-      throw new Error('Basket is empty');
-    }
-
-    // Check if user already has an active reservation
-    const existingReservation = await prisma.reservation.findUnique({
-      where: { userId }
-    });
-
-    // If existing reservation, delete it and return stock
-    if (existingReservation) {
-      await cancelReservation(existingReservation.reservationId);
-    }
-
-    // Verify all products have sufficient inventory
-    for (const basketItem of basket.items) {
-      const inventory = basketItem.product.inventory[0]; // Get first inventory record
-      if (!inventory) {
-        throw new Error(`No inventory found for product ${basketItem.product.productId}`);
+        await tx.inventory.update({
+          where: { inventoryId: inventory.inventoryId },
+          data: { reservedQuantity: { increment: item.quantity } },
+        });
       }
 
-      const availableQuantity = inventory.quantity - inventory.reservedQuantity;
-      if (availableQuantity < basketItem.quantity) {
-        throw new Error(
-          `Insufficient stock for ${basketItem.product.name}. Available: ${availableQuantity}, Requested: ${basketItem.quantity}`
-        );
-      }
-    }
-
-    // Create reservation with 15-minute expiry
-    const expiresAt = new Date(Date.now() + RESERVATION_TIMEOUT_MS);
-
-    const reservation = await prisma.reservation.create({
-      data: {
-        userId,
-        expiresAt,
-        items: {
-          create: basket.items.map(item => ({
-            productId: item.productId,
-            quantity: item.quantity
-          }))
-        }
-      },
-      include: {
-        items: {
-          include: {
-            product: true
-          }
-        }
-      }
-    });
-
-    // Update inventory reserved quantities
-    for (const reservationItem of reservation.items) {
-      await prisma.inventory.updateMany({
-        where: { productId: reservationItem.productId },
+      return tx.reservation.create({
         data: {
-          reservedQuantity: {
-            increment: reservationItem.quantity
-          }
-        }
+          userId,
+          expiresAt: new Date(Date.now() + RESERVATION_TIMEOUT_MS),
+          items: { create: basket.items.map((item) => ({ productId: item.productId, quantity: item.quantity })) },
+        },
+        include: { items: { include: { product: true } } },
       });
-    }
-
-    console.log(`✅ Reservation created: ${reservation.reservationId} for user ${userId}, expires at ${expiresAt}`);
+    });
 
     return {
       success: true,
       reservation,
-      expiresAt,
-      message: 'Reservation created successfully. You have 15 minutes to complete checkout.'
+      expiresAt: reservation.expiresAt,
+      message: 'Reservation created successfully. You have 15 minutes to complete checkout.',
     };
   } catch (error) {
-    console.error('❌ Error creating reservation:', error);
+    if (isUniqueViolation(error)) {
+      throw new ReservationError(409, 'Checkout is already in progress. Please try again.');
+    }
     throw error;
   }
 }
 
 /**
- * Cancels a reservation and returns stock to inventory
- * Called when user clicks "continue shopping" or reservation expires
+ * Continue shopping: marks the reservation CANCELLED and returns its stock.
  */
 export async function cancelReservation(reservationId: number) {
-  try {
-    const reservation = await prisma.reservation.findUnique({
-      where: { reservationId },
-      include: { items: true }
-    });
-
-    if (!reservation) {
-      throw new Error(`Reservation ${reservationId} not found`);
-    }
-
-    // Return reserved quantities to inventory
-    for (const item of reservation.items) {
-      await prisma.inventory.updateMany({
-        where: { productId: item.productId },
-        data: {
-          reservedQuantity: {
-            decrement: item.quantity
-          }
-        }
-      });
-    }
-
-    // Delete the reservation (cascades to items)
-    await prisma.reservation.delete({
-      where: { reservationId }
-    });
-
-    console.log(`✅ Reservation ${reservationId} cancelled, stock returned to inventory`);
-
-    return {
-      success: true,
-      message: 'Reservation cancelled, stock returned to inventory.'
-    };
-  } catch (error) {
-    console.error('❌ Error cancelling reservation:', error);
-    throw error;
+  const released = await prisma.$transaction((tx) => releaseReservation(tx, reservationId, 'CANCELLED'));
+  if (!released) {
+    throw new ReservationError(404, 'No active reservation to cancel');
   }
+  return { success: true, message: 'Reservation cancelled, stock returned to inventory.' };
 }
 
 /**
- * Converts a reservation to an order
- * Called when user completes payment
+ * Payment complete: marks the user's reservation CONVERTED, records an order with status PROCESSING linked to it,
+ * and permanently removes the reserved stock from inventory. Runs atomically.
  */
-export async function convertReservationToOrder(
-  reservationId: number,
-  userId: number,
-  totalCost: number,
-  _paymentMethod?: string
-) {
-  try {
-    const reservation = await prisma.reservation.findUnique({
-      where: { reservationId },
-      include: { items: true }
-    });
-
+export async function convertReservationToOrder(userId: number) {
+  const result = await prisma.$transaction(async (tx) => {
+    const reservation = await findActiveReservation(tx, userId);
     if (!reservation) {
-      throw new Error(`Reservation ${reservationId} not found`);
+      throw new ReservationError(404, 'No active reservation. Please proceed to checkout again.');
     }
 
-    // Create order
-    const order = await prisma.order.create({
-      data: {
-        userId,
-        cost: totalCost,
-        orderStatus: 'PENDING',
-        orderItems: {
-          create: reservation.items.map(item => ({
-            productId: item.productId,
-            quantity: item.quantity
-          }))
-        }
-      },
-      include: {
-        orderItems: true
-      }
-    });
+    if (reservation.expiresAt <= new Date()) {
+      // Returned (not thrown) so the expiry is committed rather than rolled back.
+      await releaseReservation(tx, reservation.reservationId, 'EXPIRED');
+      return { expired: true as const };
+    }
 
-    // Permanently reduce inventory (convert reserved to sold)
+    const { count } = await tx.reservation.updateMany({
+      where: { reservationId: reservation.reservationId, status: 'ACTIVE', expiresAt: { gt: new Date() } },
+      data: { status: 'CONVERTED', releasedAt: new Date() },
+    });
+    if (count === 0) {
+      throw new ReservationError(409, 'Your reservation is no longer active. Please proceed to checkout again.');
+    }
+
     for (const item of reservation.items) {
-      await prisma.inventory.updateMany({
-        where: { productId: item.productId },
+      const inventory = await primaryInventory(tx, item.productId);
+      if (!inventory) {
+        throw new ReservationError(409, `No inventory found for ${item.product.name}`);
+      }
+      await tx.inventory.update({
+        where: { inventoryId: inventory.inventoryId },
         data: {
           quantity: { decrement: item.quantity },
-          reservedQuantity: { decrement: item.quantity }
-        }
+          reservedQuantity: Math.max(0, inventory.reservedQuantity - item.quantity),
+        },
       });
     }
 
-    // Delete the reservation
-    await prisma.reservation.delete({
-      where: { reservationId }
+    const cost = reservation.items.reduce(
+      (total, item) => total.add(item.product.price.mul(item.quantity)),
+      new Prisma.Decimal(0),
+    );
+
+    const order = await tx.order.create({
+      data: {
+        userId,
+        cost,
+        orderStatus: 'PROCESSING',
+        orderItems: {
+          create: reservation.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.product.price,
+          })),
+        },
+      },
+      include: { orderItems: true },
     });
 
-    console.log(`✅ Order ${order.orderId} created from reservation ${reservationId}, inventory permanently reduced`);
+    await tx.reservation.update({ where: { reservationId: reservation.reservationId }, data: { orderId: order.orderId } });
 
-    return {
-      success: true,
-      order,
-      message: 'Order created successfully, inventory updated.'
-    };
-  } catch (error) {
-    console.error('❌ Error converting reservation to order:', error);
-    throw error;
+    return { expired: false as const, order, reservationId: reservation.reservationId };
+  });
+
+  if (result.expired) {
+    throw new ReservationError(410, 'Your reservation has expired. Please proceed to checkout again.');
   }
+
+  const { order, reservationId } = result;
+  return {
+    success: true,
+    reservationId,
+    order: {
+      orderId: order.orderId,
+      orderStatus: order.orderStatus,
+      cost: order.cost.toFixed(2),
+      orderPlacedAt: order.orderPlacedAt,
+      items: order.orderItems.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+    },
+    message: 'Order created successfully, inventory updated.',
+  };
 }
 
 /**
- * Cleans up expired reservations
- * Should be run periodically (e.g., every 1 minute via cron job or middleware)
+ * Marks every ACTIVE reservation past its expiry as EXPIRED and returns its stock.
+ * Run periodically by reservationCleanupMiddleware.
  */
 export async function cleanupExpiredReservations() {
-  try {
-    const now = new Date();
+  const expired = await prisma.reservation.findMany({
+    where: { status: 'ACTIVE', expiresAt: { lte: new Date() } },
+    select: { reservationId: true },
+  });
 
-    // Find all expired reservations
-    const expiredReservations = await prisma.reservation.findMany({
-      where: {
-        expiresAt: {
-          lt: now
-        }
-      },
-      include: { items: true }
-    });
-
-    if (expiredReservations.length === 0) {
-      console.log('✅ No expired reservations to cleanup');
-      return { cleaned: 0 };
+  let cleaned = 0;
+  for (const { reservationId } of expired) {
+    if (await prisma.$transaction((tx) => releaseReservation(tx, reservationId, 'EXPIRED', true))) {
+      cleaned += 1;
     }
-
-    // Cancel each expired reservation (returns stock)
-    for (const reservation of expiredReservations) {
-      console.log(`⏰ Expiring reservation ${reservation.reservationId} for user ${reservation.userId}`);
-
-      // Return reserved quantities
-      for (const item of reservation.items) {
-        await prisma.inventory.updateMany({
-          where: { productId: item.productId },
-          data: {
-            reservedQuantity: {
-              decrement: item.quantity
-            }
-          }
-        });
-      }
-
-      // Delete reservation
-      await prisma.reservation.delete({
-        where: { reservationId: reservation.reservationId }
-      });
-    }
-
-    console.log(`✅ Cleaned up ${expiredReservations.length} expired reservations`);
-    return { cleaned: expiredReservations.length };
-  } catch (error) {
-    console.error('❌ Error cleaning up expired reservations:', error);
-    throw error;
   }
+
+  return { cleaned };
 }
 
 /**
- * Gets active reservation for a user
+ * Returns the user's ACTIVE reservation, expiring it first if its time is up.
  */
 export async function getUserReservation(userId: number) {
-  try {
-    const reservation = await prisma.reservation.findUnique({
-      where: { userId },
-      include: {
-        items: {
-          include: {
-            product: true
-          }
-        }
-      }
-    });
+  const reservation = await findActiveReservation(prisma, userId);
+  if (!reservation) return null;
 
-    if (!reservation) {
-      return null;
-    }
-
-    // Check if reservation is expired
-    if (new Date() > reservation.expiresAt) {
-      // Expired, cancel it
-      await cancelReservation(reservation.reservationId);
-      return null;
-    }
-
-    // Calculate time remaining
-    const timeRemaining = Math.max(0, reservation.expiresAt.getTime() - Date.now());
-    const minutesRemaining = Math.floor(timeRemaining / 60000);
-
-    return {
-      ...reservation,
-      minutesRemaining,
-      isExpired: false
-    };
-  } catch (error) {
-    console.error('❌ Error getting user reservation:', error);
-    throw error;
+  if (reservation.expiresAt <= new Date()) {
+    await prisma.$transaction((tx) => releaseReservation(tx, reservation.reservationId, 'EXPIRED', true));
+    return null;
   }
+
+  const timeRemaining = Math.max(0, reservation.expiresAt.getTime() - Date.now());
+  return { ...reservation, minutesRemaining: Math.floor(timeRemaining / 60000), isExpired: false };
 }
 
 /**
- * Gets available quantity for a product (total - reserved)
+ * Stock that can still be reserved (quantity - reserved_quantity).
  */
 export async function getAvailableQuantity(productId: number) {
-  try {
-    const inventory = await prisma.inventory.findFirst({
-      where: { productId }
-    });
-
-    if (!inventory) {
-      return 0;
-    }
-
-    return Math.max(0, inventory.quantity - inventory.reservedQuantity);
-  } catch (error) {
-    console.error('❌ Error getting available quantity:', error);
-    throw error;
-  }
+  const inventory = await primaryInventory(prisma, productId);
+  if (!inventory) return 0;
+  return Math.max(0, inventory.quantity - inventory.reservedQuantity);
 }
 
 export default {
@@ -340,5 +258,5 @@ export default {
   cleanupExpiredReservations,
   getUserReservation,
   getAvailableQuantity,
-  RESERVATION_TIMEOUT_MS
+  RESERVATION_TIMEOUT_MS,
 };
