@@ -32,9 +32,9 @@ export function createPaymentRouter(
 		const userId = await requireCustomerAuth(req, res);
 		if (userId === null) return;
 
-		const { reservationId } = req.body;
-		if (typeof reservationId !== 'number') {
-			res.status(400).json({ error: 'reservationId is required and must be a number' });
+		const { reservationId } = req.body ?? {};
+		if (!Number.isInteger(reservationId) || reservationId <= 0 || reservationId > 2147483647) {
+			res.status(400).json({ error: 'reservationId is required and must be a positive 32-bit integer' });
 			return;
 		}
 
