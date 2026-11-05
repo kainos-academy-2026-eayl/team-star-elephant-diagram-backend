@@ -94,6 +94,7 @@ export class OrderService {
 						orderId: createdOrder.orderId,
 						productId: item.productId,
 						quantity: item.quantity,
+						unitPrice: item.unitPrice,
 					},
 				});
 			}
@@ -141,7 +142,7 @@ export class OrderService {
 			items: order.orderItems.map((oi) => ({
 				productId: oi.productId,
 				quantity: oi.quantity,
-				unitPrice: typeof oi.product.price === 'number' ? oi.product.price : Number(oi.product.price),
+				unitPrice: Number(oi.unitPrice),
 				productName: oi.product.name,
 			})),
 			orderStatus: order.orderStatus,

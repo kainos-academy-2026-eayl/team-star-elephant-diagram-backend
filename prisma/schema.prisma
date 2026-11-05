@@ -162,6 +162,7 @@ model OrderItem {
   orderId   Int
   productId Int
   quantity  Int     @default(1)
+  unitPrice Decimal @map("unit_price") @db.Decimal(10, 2)
   order     Order   @relation(fields: [orderId], references: [orderId])
   product   Product @relation(fields: [productId], references: [productId])
 

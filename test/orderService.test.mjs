@@ -13,6 +13,7 @@ test('order creation consumes an active reservation in the order transaction', a
 			items: [{ productId: 11, quantity: 2 }],
 		},
 		orders: [],
+		orderItems: [],
 	};
 	const consumeArgs = [];
 	const orderService = new OrderService(
@@ -42,7 +43,11 @@ test('order creation consumes an active reservation in the order transaction', a
 						return order;
 					},
 				},
-				orderItem: { create: async () => {} },
+				orderItem: {
+					create: async ({ data }) => {
+						state.orderItems.push(data);
+					},
+				},
 			}),
 		},
 		{
@@ -66,6 +71,37 @@ test('order creation consumes an active reservation in the order transaction', a
 	assert.ok(consumeArgs[0].where.expiresAt.gt instanceof Date);
 	assert.equal(consumeArgs[0].data.status, 'CONVERTED');
 
+	assert.deepEqual(state.orderItems, [{ orderId: 1, productId: 11, quantity: 2, unitPrice: 5 }]);
+
 	await assert.rejects(orderService.createOrderFromReservation(3, 7), OrderError);
 	assert.equal(state.orders.length, 1);
+});
+
+test('order lookup returns the purchase-time unit price', async () => {
+	const orderService = new OrderService(
+		{
+			order: {
+				findUnique: async () => ({
+					orderId: 1,
+					userId: 3,
+					cost: '10.00',
+					shippingFee: '20.00',
+					orderStatus: 'PENDING',
+					orderPlacedAt: new Date(),
+					orderItems: [{
+						productId: 11,
+						quantity: 2,
+						unitPrice: '5.00',
+						product: { name: 'Widget', price: '99.00' },
+					}],
+				}),
+			},
+		},
+		{},
+		{},
+	);
+
+	const result = await orderService.getOrder(1, 3);
+
+	assert.equal(result.items[0].unitPrice, 5);
 });
