@@ -99,7 +99,7 @@ export function userController(
         }
     });
 
-    router.put('/profile/shipping-address', async (req, res) => {
+    router.put('/profile/shipping-address', createAuthRateLimiter(rateLimitOptions), async (req, res) => {
         const header = req.get('authorization') ?? '';
         const payload = header.startsWith('Bearer ') ? await tokens.verifyCustomerAccessToken(header.slice(7)) : null;
         if (!payload || typeof payload.userId !== 'number') {
