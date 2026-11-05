@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { StockStatus } from '@prisma/client';
+import { createProductSchema } from './productSchema';
 
 export const MAX_STOCK = 2_147_483_647;
 export const RECENT_ADJUSTMENTS_LIMIT = 20;
@@ -23,8 +24,29 @@ export const inventoryPaginationSchema = z.object({
 export const inventoryQuerySchema = inventoryPaginationSchema.extend({
 	search: z.string().trim().max(100).optional(),
 	status: z.enum(StockStatus).optional(),
+	sort: z.enum(['productId', 'name', 'sku', 'price', 'stockQuantity', 'lowStockThreshold', 'stockStatus']).optional(),
+	direction: z.enum(['asc', 'desc']).optional(),
 });
 
+const inventoryProductSchema = createProductSchema.extend({
+	imageURL: z.string().trim().min(1).max(255).pipe(z.union([
+		z.url({ protocol: /^https?$/ }), z.string().regex(/^\/images\/[A-Za-z0-9_./-]+$/),
+	])),
+});
+export const inventoryCreateSchema = inventoryProductSchema.extend({
+	sku: z.string().trim().min(1).max(64),
+	stockQuantity: stockInteger.nonnegative(),
+	lowStockThreshold: stockInteger.nonnegative(),
+	supplierId: z.number().int().positive().max(MAX_STOCK),
+}).strict();
+export const inventoryUpdateSchema = inventoryProductSchema.extend({
+	stockQuantity: stockInteger.nonnegative(),
+	lowStockThreshold: stockInteger.nonnegative(),
+	reason: z.string().trim().min(3).max(255),
+}).strict();
+
+export type InventoryCreateInput = z.infer<typeof inventoryCreateSchema>;
+export type InventoryUpdateInput = z.infer<typeof inventoryUpdateSchema>;
 export type StockAdjustmentInput = z.infer<typeof stockAdjustmentSchema>;
 export type ThresholdInput = z.infer<typeof thresholdSchema>;
 export type InventoryQuery = z.infer<typeof inventoryQuerySchema>;

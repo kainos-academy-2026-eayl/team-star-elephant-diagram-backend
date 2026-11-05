@@ -379,6 +379,16 @@ export class AdminUserService {
 
 		return {
 			staff: { name: `${admin.forename} ${admin.surname}` },
+			inventoryPermissions: {
+				view: can('inventory', 'view'), create: can('inventory', 'create'),
+				update: can('inventory', 'update'), delete: can('inventory', 'delete'),
+			},
+			inventorySummary: inventory ? {
+				totalProducts: inventory.totalProducts,
+				lowStockProducts: inventory.lowStockProducts,
+				outOfStockProducts: inventory.outOfStockProducts,
+			} : null,
+			lowStock: inventory ? { total: inventory.lowStockLines, items: inventory.lowStockItems } : null,
 			role: admin.role,
 			dashboard: admin.dashboard,
 			sections: DASHBOARD_SECTIONS.filter((s) => can(s.resource, s.action)).map(({ label }) => ({ label })),

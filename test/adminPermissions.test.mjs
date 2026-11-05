@@ -157,8 +157,10 @@ const adminRepository = {
 	async getInventoryMetrics() {
 		adminCalls.inventory++;
 		return {
+			totalProducts: 12, lowStockProducts: 3, outOfStockProducts: 2,
 			unitsInStock: 120,
 			lowStockLines: 2,
+			lowStockItems: [{ inventoryId: 7, product: 'Green tea', supplier: 'Tea supplier', quantity: 0, reorderLevel: 5 }],
 			recentStockChanges: [{ product: 'Green tea', quantity: 40, modifiedAt: new Date('2026-10-01T09:00:00Z') }],
 		};
 	},
@@ -363,6 +365,12 @@ test('GET /admin keeps the dashboard response structure for every role', async (
 		const body = await dashboardFor(role);
 		assert.deepEqual(body.staff, { name: `Test ${role}` });
 		assert.equal(body.role, role);
+		assert.deepEqual(body.inventoryPermissions, Object.fromEntries(
+			['view', 'create', 'update', 'delete'].map((action) => [action, hasPermission(role, 'inventory', action)]),
+		));
+		assert.deepEqual(body.inventorySummary, { totalProducts: 12, lowStockProducts: 3, outOfStockProducts: 2 });
+		assert.equal(body.lowStock.total, 2);
+		assert.equal(body.lowStock.items[0].product, 'Green tea');
 		for (const key of ['sections', 'quickActions', 'cards', 'recentOrders', 'newUsers', 'stockChanges']) {
 			assert.ok(Array.isArray(body[key]), `${role} ${key}`);
 		}

@@ -48,8 +48,12 @@ export interface AdminOrderMetrics {
 }
 
 export interface AdminInventoryMetrics {
+	totalProducts: number;
+	lowStockProducts: number;
+	outOfStockProducts: number;
 	unitsInStock: number;
 	lowStockLines: number;
+	lowStockItems: Array<{ inventoryId: number; product: string; supplier: string; quantity: number; reorderLevel: number }>;
 	recentStockChanges: Array<{ product: string; quantity: number; modifiedAt: Date }>;
 }
 
@@ -132,21 +136,38 @@ export const prismaAdminUserRepository: adminRepository = {
 		};
 	},
 	async getInventoryMetrics() {
-		const [stock, lowStockLines, recent] = await prisma.$transaction([
-			prisma.product.aggregate({ _sum: { stockQuantity: true } }),
-			prisma.product.count({ where: { stockStatus: { in: ['LOW_STOCK', 'OUT_OF_STOCK'] } } }),
-			prisma.product.findMany({
-				select: { stockQuantity: true, modifiedAt: true, name: true },
-				orderBy: [{ modifiedAt: 'desc' }, { productId: 'desc' }],
+		const [stock, lowStockLines, recent, lowStock, totalProducts, lowStockProducts, outOfStockProducts] = await prisma.$transaction([
+			prisma.inventory.aggregate({ _sum: { quantity: true } }),
+			prisma.inventory.count({ where: { quantity: { lte: prisma.inventory.fields.reorderLevel } } }),
+			prisma.inventory.findMany({
+				select: { quantity: true, modifiedAt: true, product: { select: { name: true } } },
+				orderBy: [{ modifiedAt: 'desc' }, { inventoryId: 'desc' }],
 				take: DASHBOARD_RECENT_ROWS,
 			}),
+			prisma.inventory.findMany({
+				where: { quantity: { lte: prisma.inventory.fields.reorderLevel } },
+				select: {
+					inventoryId: true, quantity: true, reorderLevel: true,
+					product: { select: { name: true } }, supplier: { select: { name: true } },
+				},
+				orderBy: [{ quantity: 'asc' }, { inventoryId: 'asc' }],
+				take: DASHBOARD_RECENT_ROWS,
+			}),
+			prisma.product.count(),
+			prisma.product.count({ where: { stockStatus: 'LOW_STOCK' } }),
+			prisma.product.count({ where: { stockStatus: 'OUT_OF_STOCK' } }),
 		]);
 		return {
-			unitsInStock: stock._sum.stockQuantity ?? 0,
+			totalProducts, lowStockProducts, outOfStockProducts,
+			unitsInStock: stock._sum.quantity ?? 0,
 			lowStockLines,
+			lowStockItems: lowStock.map((row) => ({
+				inventoryId: row.inventoryId, product: row.product.name, supplier: row.supplier.name,
+				quantity: row.quantity, reorderLevel: row.reorderLevel,
+			})),
 			recentStockChanges: recent.map((row) => ({
-				product: row.name,
-				quantity: row.stockQuantity,
+				product: row.product.name,
+				quantity: row.quantity,
 				modifiedAt: row.modifiedAt,
 			})),
 		};

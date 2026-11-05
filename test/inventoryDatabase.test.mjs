@@ -45,6 +45,59 @@ test('PostgreSQL inventory: adjustments, synchronization, history, atomic rollba
 		supplier = await db.supplier.create({ data: { name: `Inventory ${suffix}`, email: `${suffix}@example.com`, address: 'Test' } });
 		secondary = await db.supplier.create({ data: { name: `Secondary ${suffix}`, email: `second-${suffix}@example.com`, address: 'Test' } });
 
+		await t.test('creates and edits products atomically with supplier stock, immutable SKU and named audit history', async () => {
+			const input = {
+				name: `Created tea ${suffix}`, description: 'Tea leaves', category: 'Drinks', price: 2.5,
+				imageURL: 'https://example.com/tea.png', sku: `TEA-${suffix}`,
+				stockQuantity: 12, lowStockThreshold: 5, supplierId: supplier.supplierId,
+			};
+			const created = await service.createProduct(input, admin.adminId);
+			productIds.push(created.productId);
+			await checkTotal(created.productId, 12, 'IN_STOCK');
+			assert.equal(created.price.toString(), '2.5');
+			assert.equal(created.sku, input.sku);
+			await assert.rejects(service.createProduct(input, admin.adminId), (error) => error.status === 409);
+			assert.equal(await db.product.count({ where: { sku: input.sku } }), 1);
+			const { sku, supplierId, ...editable } = input;
+			const updated = await service.updateProduct(created.productId, {
+				...editable, name: 'Updated tea', price: 3.75, imageURL: '/images/tea.png',
+				stockQuantity: 4, lowStockThreshold: 6, reason: 'Stock count',
+			}, admin.adminId);
+			assert.equal(updated.name, 'Updated tea');
+			assert.equal(updated.price.toString(), '3.75');
+			assert.equal(updated.sku, sku);
+			await checkTotal(created.productId, 4, 'LOW_STOCK');
+			const history = await service.getAdjustmentHistory(created.productId);
+			assert.equal(history.totalItems, 2);
+			assert.equal(history.items[0].adjustedBy.forename, 'Inventory');
+			assert.equal(history.items[0].previousStock, 12);
+			assert.equal(history.items[0].newStock, 4);
+			assert.equal(history.items[0].reason, 'Stock count');
+			const row = await db.inventory.findFirstOrThrow({ where: { productId: created.productId } });
+			await db.inventory.update({ where: { inventoryId: row.inventoryId }, data: { reservedQuantity: 3 } });
+			await assert.rejects(service.updateProduct(created.productId, {
+				...editable, name: 'Must roll back', stockQuantity: 1, reason: 'Invalid count',
+			}, admin.adminId), (error) => error.status === 400);
+			assert.equal((await service.getInventoryById(created.productId)).product.name, 'Updated tea');
+			await assert.rejects(service.deleteProduct(created.productId), (error) => error.status === 409);
+			await db.inventory.update({ where: { inventoryId: row.inventoryId }, data: { reservedQuantity: 0 } });
+			await service.deleteProduct(created.productId);
+			productIds.splice(productIds.indexOf(created.productId), 1);
+			assert.equal(await db.product.findUnique({ where: { productId: created.productId } }), null);
+			assert.equal(await db.stockAdjustment.count({ where: { productId: created.productId } }), 0);
+		});
+
+		await t.test('rejects unknown suppliers and rolls back initial product creation if its audit fails', async () => {
+			const input = {
+				name: `Rollback ${suffix}`, description: 'Rollback fixture', category: 'Tea', price: 1,
+				imageURL: '/images/tea.png', sku: `ROLLBACK-${suffix}`, stockQuantity: 2, lowStockThreshold: 1,
+				supplierId: 2_147_483_647,
+			};
+			await assert.rejects(service.createProduct(input, admin.adminId), (error) => error.status === 400);
+			await assert.rejects(service.createProduct({ ...input, supplierId: supplier.supplierId }, 2_147_483_647));
+			assert.equal(await db.product.count({ where: { sku: input.sku } }), 0);
+		});
+
 		await t.test('adds 20 + 10 = 30, removes 20 - 5 = 15, and records the actor and notes', async () => {
 			for (const [quantity, adjustment, expected, reason] of [[20, 10, 30, 'Restock'], [20, -5, 15, 'Count'], [10, -3, 7, 'Damaged']]) {
 				const { productId } = await makeProduct(quantity);
@@ -141,6 +194,8 @@ test('PostgreSQL inventory: adjustments, synchronization, history, atomic rollba
 			assert.equal(result.items[0].productId, productId);
 			assert.equal((await service.getInventory({ search: sku, status: 'IN_STOCK' })).totalItems, 0);
 			assert.equal((await service.getInventory({ search: suffix })).totalItems, productIds.length);
+			const sorted = await service.getInventory({ search: suffix, sort: 'stockQuantity', direction: 'desc' });
+			assert.deepEqual(sorted.items.map((row) => row.stockQuantity), sorted.items.map((row) => row.stockQuantity).sort((a, b) => b - a));
 			const beyond = await service.getInventory({ search: sku, page: 2, limit: 1 });
 			assert.deepEqual(beyond.items, []);
 			assert.equal(beyond.currentPage, 2);
@@ -236,7 +291,7 @@ test('PostgreSQL inventory: adjustments, synchronization, history, atomic rollba
 				assert.equal((await request(`/${productId}/stock`, 'PATCH', { adjustment: -17, reason: 'Damaged' })).status, 400);
 				await checkTotal(productId, 16, 'LOW_STOCK');
 				await db.adminUser.update({ where: { adminId: admin.adminId }, data: { role: 'WarehouseStaff' } });
-				assert.equal((await request(`/${productId}/threshold`, 'PATCH', { lowStockThreshold: 1 })).status, 403);
+				assert.equal((await request(`/${productId}/threshold`, 'PATCH', { lowStockThreshold: 1 })).status, 200);
 				assert.equal((await request(`/${productId}/stock`, 'PATCH', { adjustment: 1, reason: 'Restock' })).status, 200);
 			} finally {
 				await db.adminUser.update({ where: { adminId: admin.adminId }, data: { role: 'InventoryManager' } });

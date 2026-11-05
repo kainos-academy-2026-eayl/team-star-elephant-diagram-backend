@@ -9,6 +9,7 @@ import { InventoryController } from '../src/controllers/inventoryController.ts';
 import { createInventoryRouter } from '../src/routes/inventoryRoutes.ts';
 import { InventoryError, InventoryService } from '../src/services/inventoryService.ts';
 import { TokenService } from '../src/services/tokenService.ts';
+import { hasPermission } from '../src/models/adminRoles.ts';
 import {
 	inventoryIdSchema, inventoryPaginationSchema, inventoryQuerySchema,
 	stockAdjustmentSchema, thresholdSchema,
@@ -104,6 +105,7 @@ test('controller forwards validated payload and the authenticated actor, not bod
 	const calls = [];
 	const service = Object.fromEntries([
 		'getInventory', 'getInventoryById', 'adjustStock', 'updateThreshold', 'getAdjustmentHistory',
+		'createProduct', 'updateProduct', 'deleteProduct', 'getSuppliers',
 	].map((method) => [method, async (...args) => { calls.push([method, ...args]); return { ok: true }; }]));
 	const controller = new InventoryController(service);
 	const res = {
@@ -143,6 +145,7 @@ const stored = new Map([
 const calls = [];
 const service = Object.fromEntries([
 	'getInventory', 'getInventoryById', 'adjustStock', 'updateThreshold', 'getAdjustmentHistory',
+	'createProduct', 'updateProduct', 'deleteProduct', 'getSuppliers',
 ].map((method) => [method, async (...args) => {
 	calls.push([method, ...args]);
 	if (args[0] === 404) throw new InventoryError(404, 'Product not found');
@@ -173,33 +176,46 @@ async function request(path = '', { id, token, body, method = 'GET' } = {}) {
 	});
 }
 
+const productInput = {
+	name: 'Tea', description: 'Tea leaves', category: 'Drinks', price: 2.5, imageURL: 'https://example.com/tea.png',
+	sku: 'TEA-1', stockQuantity: 10, lowStockThreshold: 5, supplierId: 2,
+};
+const { sku: _sku, supplierId: _supplier, ...editable } = productInput;
 const endpoints = [
-	['', 'GET'], ['/1', 'GET'], ['/1/history', 'GET'],
-	['/1/stock', 'PATCH', { adjustment: 1, reason: 'Count' }],
-	['/1/threshold', 'PATCH', { lowStockThreshold: 10 }],
+	['', 'GET', undefined, 'view'], ['/1', 'GET', undefined, 'view'], ['/1/history', 'GET', undefined, 'view'],
+	['/1/stock', 'PATCH', { adjustment: 1, reason: 'Count' }, 'update'],
+	['/1/threshold', 'PATCH', { lowStockThreshold: 10 }, 'update'],
+	['', 'POST', productInput, 'create'],
+	['/suppliers', 'GET', undefined, 'create'],
+	['/1', 'PUT', { ...editable, reason: 'Stock count' }, 'update'],
+	['/1', 'DELETE', undefined, 'delete'],
 ];
 
-test('all endpoints require JWT and the current permitted staff role', async () => {
-	for (const [path, method, body] of endpoints) {
+test('all endpoints reuse KAN-97 permissions against the current stored role', async () => {
+	for (const [path, method, body, action] of endpoints) {
 		const before = calls.length;
 		assert.equal((await request(path, { method, body })).status, 401);
 		assert.equal((await request(path, { method, body, token: 'invalid' })).status, 401);
 		assert.equal((await request(path, { method, body, id: 99 })).status, 401);
-		for (const id of [3, 4, 5, 6]) assert.equal((await request(path, { method, body, id })).status, 403);
 		const customer = await tokens.signAccess({ kind: 'customer', userId: 1, email: 'test@example.com' });
 		assert.equal((await request(path, { method, body, token: customer })).status, 403);
 		assert.equal(calls.length, before, 'Unauthorised requests must not access inventory');
-		assert.equal((await request(path, { method, body, id: 1 })).status, 200);
-		assert.equal((await request(path, { method, body, id: 2 })).status, path.endsWith('threshold') ? 403 : 200);
+		for (const [id, admin] of stored) {
+			const before = calls.length;
+			const allowed = hasPermission(admin.role, 'inventory', action);
+			assert.equal((await request(path, { method, body, id })).status, allowed ? (method === 'POST' ? 201 : 200) : 403, `${admin.role} ${method} ${path}`);
+			assert.equal(calls.length, before + Number(allowed));
+		}
 	}
 });
 
 test('stored role changes override JWT role claims', async () => {
 	const token = await tokens.signAccessToken({ adminId: 1, role: 'InventoryManager' });
-	stored.set(1, { adminId: 1, role: 'WarehouseStaff' });
+	stored.set(1, { adminId: 1, role: 'CustomerService' });
 	try {
 		assert.equal((await request('/1/threshold', { token, method: 'PATCH', body: { lowStockThreshold: 5 } })).status, 403);
-		assert.equal((await request('/1/stock', { token, method: 'PATCH', body: { adjustment: 2, reason: 'Count' } })).status, 200);
+		assert.equal((await request('/1/stock', { token, method: 'PATCH', body: { adjustment: 2, reason: 'Count' } })).status, 403);
+		assert.equal((await request('/1/history', { token })).status, 200);
 	} finally {
 		stored.set(1, { adminId: 1, role: 'InventoryManager' });
 	}
@@ -213,6 +229,13 @@ test('routes validate before invoking services and return JSON errors', async ()
 		['/1/stock', 'PATCH', { adjustment: 1, reason: 'x' }],
 		['/1/stock', 'PATCH', { adjustment: 1, reason: 'Count', userId: 99 }],
 		['/1/threshold', 'PATCH', { lowStockThreshold: -1 }],
+		['', 'POST', { ...productInput, sku: '' }],
+		['', 'POST', { ...productInput, supplierId: 0 }],
+		['', 'POST', { ...productInput, price: '2.001' }],
+		['', 'POST', { ...productInput, stockQuantity: -1 }],
+		['/1', 'PUT', { ...editable, reason: 'x' }],
+		['/1', 'PUT', { ...editable, reason: 'Count', sku: 'immutable' }],
+		['?sort=notAColumn', 'GET'],
 	]) {
 		const before = calls.length;
 		const response = await request(path, { id: 1, method, body });

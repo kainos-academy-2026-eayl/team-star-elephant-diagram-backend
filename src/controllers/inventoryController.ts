@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import type { InventoryService } from '../services/inventoryService';
-import type { InventoryPagination, InventoryQuery, StockAdjustmentInput, ThresholdInput } from '../validators/inventorySchema';
+import type { InventoryCreateInput, InventoryUpdateInput, InventoryPagination, InventoryQuery, StockAdjustmentInput, ThresholdInput } from '../validators/inventorySchema';
 
 export interface InventoryRequest {
 	productId: number;
@@ -8,6 +8,8 @@ export interface InventoryRequest {
 	pagination: InventoryPagination;
 	adjustment: StockAdjustmentInput;
 	threshold: ThresholdInput;
+	create: InventoryCreateInput;
+	update: InventoryUpdateInput;
 }
 
 declare module 'express-serve-static-core' {
@@ -24,6 +26,27 @@ function validated<K extends keyof InventoryRequest>(res: Response, key: K): Inv
 
 export class InventoryController {
 	constructor(private readonly service: InventoryService) {}
+
+	getSuppliers = async (_req: Request, res: Response): Promise<void> => {
+		res.json({ suppliers: await this.service.getSuppliers() });
+	};
+
+	createProduct = async (_req: Request, res: Response): Promise<void> => {
+		const admin = res.locals.currentAdmin;
+		if (!admin) throw new Error('Missing authenticated inventory admin');
+		res.status(201).json(await this.service.createProduct(validated(res, 'create'), admin.adminId));
+	};
+
+	updateProduct = async (_req: Request, res: Response): Promise<void> => {
+		const admin = res.locals.currentAdmin;
+		if (!admin) throw new Error('Missing authenticated inventory admin');
+		res.json(await this.service.updateProduct(validated(res, 'productId'), validated(res, 'update'), admin.adminId));
+	};
+
+	deleteProduct = async (_req: Request, res: Response): Promise<void> => {
+		await this.service.deleteProduct(validated(res, 'productId'));
+		res.json({ deleted: true });
+	};
 
 	getInventory = async (_req: Request, res: Response): Promise<void> => {
 		res.json(await this.service.getInventory(validated(res, 'query')));

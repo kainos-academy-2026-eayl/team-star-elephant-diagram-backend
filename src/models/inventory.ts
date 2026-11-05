@@ -9,7 +9,7 @@ export interface PaginatedInventory<T> {
 
 export type InventoryItem = Pick<Product,
 	'productId' | 'name' | 'description' | 'sku' | 'stockQuantity' |
-	'lowStockThreshold' | 'stockStatus' | 'createdAt' | 'modifiedAt'
+	'lowStockThreshold' | 'stockStatus' | 'createdAt' | 'modifiedAt' | 'price' | 'category' | 'imageURL'
 >;
 
 export interface InventoryDetails {

@@ -65,6 +65,12 @@ export interface AdminBasketDetailsResponse {
 }
 // Role-scoped admin dashboard; must match frontend AdminDashboard in src/services/adminService.ts.
 export interface AdminDashboardResponse {
+    inventoryPermissions: { view: boolean; create: boolean; update: boolean; delete: boolean };
+    inventorySummary: { totalProducts: number; lowStockProducts: number; outOfStockProducts: number } | null;
+    lowStock: {
+        total: number;
+        items: Array<{ inventoryId: number; product: string; supplier: string; quantity: number; reorderLevel: number }>;
+    } | null;
     staff: { name: string };
     role: string;
     dashboard: string;

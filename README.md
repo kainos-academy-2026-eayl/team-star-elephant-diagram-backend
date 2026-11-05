@@ -99,13 +99,20 @@ Use `npm ci` rather than `npm install`. It installs the exact versions recorded 
 ## Admin inventory (KAN-71)
 
 All `/api/admin/inventory` endpoints require an admin Bearer access JWT and the
-**current stored** `InventoryManager` or `WarehouseStaff` role. Other roles,
-including SuperAdmin, are denied on this API. Only InventoryManager can change
-thresholds. Existing admin resource permissions elsewhere are unchanged.
+existing KAN-97 `requirePermission('inventory', action)` checks against the
+**current stored** role. There is no separate inventory role allowlist.
+SuperAdmin and InventoryManager have CRUD access; WarehouseStaff may view and
+update; other grants follow the existing permission matrix without duplication.
+The dashboard returns `inventoryPermissions` from that same permission utility
+and `inventorySummary` with separate total, low-stock and out-of-stock product counts.
 
 | Method | Path | Payload/query |
 | --- | --- | --- |
-| GET | `/api/admin/inventory` | `page=1`, `limit=20` (max 100), `search` (name/SKU), `status` |
+| GET | `/api/admin/inventory` | `page=1`, `limit=20` (max 100), `search` (name/SKU), `status`, `sort`, `direction=asc\|desc` |
+| GET | `/api/admin/inventory/suppliers` | Existing supplier IDs/names; requires inventory:create |
+| POST | `/api/admin/inventory` | Product fields, SKU, `stockQuantity`, `lowStockThreshold`, `supplierId`; requires inventory:create |
+| PUT | `/api/admin/inventory/:id` | Editable product fields, absolute `stockQuantity`, `lowStockThreshold`, `reason`; requires inventory:update |
+| DELETE | `/api/admin/inventory/:id` | Requires inventory:delete; referenced products return 409 |
 | GET | `/api/admin/inventory/:id` | Product and latest 20 adjustments |
 | PATCH | `/api/admin/inventory/:id/stock` | `{ "adjustment": -4, "reason": "Damaged", "notes": "Packaging destroyed" }` |
 | PATCH | `/api/admin/inventory/:id/threshold` | `{ "lowStockThreshold": 10 }` |
@@ -113,9 +120,15 @@ thresholds. Existing admin resource permissions elsewhere are unchanged.
 
 Lists return `{ items, totalItems, totalPages, currentPage }`. Product DTOs retain
 the existing integer `productId` and `modifiedAt` fields (not `id`/`updatedAt`).
+Product fields include name, description, price (decimal pounds), category and
+`imageURL` (HTTP(S) URL or an existing `/images/` path). Sort fields are
+`productId`, `name`, `sku`, `price`, `stockQuantity`, `lowStockThreshold`, and
+`stockStatus`; results have a stable product-ID tie-breaker.
 History includes integer `adjustedById` referencing **AdminUser**, not customer
-User, along with product, delta, before/after stock, reason, notes and timestamp.
-SKU defaults to a unique `SKU-<uuid>` for existing and newly created products.
+User, and an `adjustedBy` object containing the staff ID/forename/surname, along
+with product, delta, before/after stock, reason, notes and timestamp.
+New inventory products require a unique SKU and a real supplier; SKU is immutable
+on update. The existing generic product API retains its generated SKU default.
 Stock and thresholds are nonnegative PostgreSQL integers; adjustments are signed
 integers and reasons are trimmed, 3–255 characters. Unknown body fields are rejected.
 
@@ -124,7 +137,9 @@ thresholds from the maximum existing reorder level. Database triggers keep
 product totals/status synchronized on inventory insert/update/delete (including
 checkout, reservation releases and seeds). Zero stock is OUT_OF_STOCK; positive
 stock at or below threshold is LOW_STOCK; otherwise IN_STOCK. Thresholds now
-belong to products; legacy supplier reorder levels are not used by admin metrics.
+belong to products. The existing KAN-104 "Low in stock" dashboard panel still uses
+supplier-line reorder levels and supplier names; the new Inventory Management
+card uses product statuses and product thresholds. These are distinct metrics.
 
 Staff adjustments run in a serializable Prisma transaction, locking the product
 and supplier inventory, and always creating an audit record before commit.
@@ -138,9 +153,14 @@ retried up to three times. Reads use consistent repeatable-read snapshots.
 Responses: 400 invalid input/negative stock/reserved stock/missing supplier,
 401 absent/invalid JWT or deleted staff account, 403 disallowed current role
 (including a valid customer JWT), 404 missing product, 409 exhausted concurrent
-write retries, and 500 unexpected persistence errors. Failures are logged without
+write retries, duplicate SKUs or protected deletions, and 500 unexpected persistence errors. Failures are logged without
 returning internal database details. No staff stock update can commit without its
-audit record; audit foreign keys prevent deletion of referenced staff/products.
+audit record. Product creation, initial supplier stock and its audit are atomic;
+edits atomically update metadata, stock, threshold and the primary gallery image.
+Deletion atomically removes the product's supplier stock, supplier links and
+adjustment history. Products referenced by orders, baskets, reservations or
+reserved stock cannot be deleted; a failed deletion rolls back all changes.
+Staff referenced by adjustment history remain protected by audit foreign keys.
 
 Apply with `npm run db:deploy` and regenerate using `npm run db:generate`.
 Existing migration history has duplicate reservation-table creation in
@@ -156,6 +176,28 @@ INVENTORY_TEST_DATABASE_URL=postgresql://dev:dev@localhost:5432/inventory_test_k
 ```
 
 The integration test only deletes its own fixtures. Never use a shared database.
+
+### Existing development database integration
+
+Do not reset or reseed a populated database to enable inventory. Apply the
+prerequisite reservation, reserved-stock, shipping-fee, allocation and order-item
+price migrations before `20261105140000_admin_inventory`. The inventory migration
+backfills totals and thresholds from existing supplier stock; it does not replace
+customers or products.
+
+For the known duplicate reservation migration only: after verifying that
+`20261104110202_add_reservation_tables` has already created the same tables and
+foreign keys, mark `20261104150000_add_reservation_tables` applied with
+`npx prisma migrate resolve --applied 20261104150000_add_reservation_tables`
+instead of executing its duplicate CREATE statements. Do not mark unrelated
+pending migrations applied. Older development databases can also contain
+historical migration names absent from this repository; preserve that history.
+Database contents, backups and local test-account credentials must not be committed.
+
+KAN-104's existing low-stock DTO/query is retained in
+`src/repositories/adminRepository.ts`, `src/services/AdminUserService.ts` and
+`src/models/AdminUser.ts`; keep both its supplier-line fields and KAN-71's new
+product counts/permission fields when integrating that backend branch.
 
 ## Authentication
 

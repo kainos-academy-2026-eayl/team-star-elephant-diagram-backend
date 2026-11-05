@@ -8,12 +8,19 @@ import type { TokenService } from '../services/tokenService';
 import {
 	inventoryIdSchema, inventoryPaginationSchema, inventoryQuerySchema,
 	stockAdjustmentSchema, thresholdSchema,
+	inventoryCreateSchema, inventoryUpdateSchema,
 } from '../validators/inventorySchema';
 
 const validate: RequestHandler = (req, res, next) => {
 	const input = res.locals.inventoryRequest ?? {};
 	if (req.params.id !== undefined) input.productId = inventoryIdSchema.parse(req.params).id;
-	if (req.method === 'GET') {
+	if (req.method === 'DELETE') {
+		// Deletion only requires the validated identifier.
+	} else if (req.method === 'POST') {
+		input.create = inventoryCreateSchema.parse(req.body);
+	} else if (req.method === 'PUT') {
+		input.update = inventoryUpdateSchema.parse(req.body);
+	} else if (req.method === 'GET') {
 		if (req.params.id === undefined) input.query = inventoryQuerySchema.parse(req.query);
 		else input.pagination = inventoryPaginationSchema.parse(req.query);
 	} else if (req.path.endsWith('/stock')) {
@@ -58,25 +65,19 @@ export function createInventoryRouter(service: InventoryService, admins: AdminUs
 			res.status(401).json({ error: 'Authentication required' });
 			return;
 		}
-		if (admin.role !== 'InventoryManager' && admin.role !== 'WarehouseStaff') {
-			res.status(403).json({ error: 'Forbidden' });
-			return;
-		}
 		res.locals.currentAdmin = admin;
 		res.set('Cache-Control', 'no-store');
 		next();
 	});
 	router.get('/', requirePermission('inventory', 'view'), validate, controller.getInventory);
+	router.get('/suppliers', requirePermission('inventory', 'create'), controller.getSuppliers);
+	router.post('/', requirePermission('inventory', 'create'), validate, controller.createProduct);
+	router.put('/:id', requirePermission('inventory', 'update'), validate, controller.updateProduct);
+	router.delete('/:id', requirePermission('inventory', 'delete'), validate, controller.deleteProduct);
 	router.get('/:id', requirePermission('inventory', 'view'), validate, controller.getInventoryItem);
 	router.get('/:id/history', requirePermission('inventory', 'view'), validate, controller.getHistory);
 	router.patch('/:id/stock', requirePermission('inventory', 'update'), validate, controller.adjustStock);
-	router.patch('/:id/threshold', (_req, res, next) => {
-		if (res.locals.currentAdmin?.role !== 'InventoryManager') {
-			res.status(403).json({ error: 'Forbidden' });
-			return;
-		}
-		next();
-	}, requirePermission('inventory', 'update'), validate, controller.updateThreshold);
+	router.patch('/:id/threshold', requirePermission('inventory', 'update'), validate, controller.updateThreshold);
 	router.use(inventoryErrorHandler);
 	return router;
 }
