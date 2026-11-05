@@ -21,6 +21,13 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum ReservationStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  CONVERTED
+}
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
@@ -92,6 +99,7 @@ model RefreshSession {
 model Inventory {
   inventoryId     Int      @id @unique @default(autoincrement()) @map("inventory_id")
   quantity        Int      @default(0)
+  reservedQuantity Int     @default(0) @map("reserved_quantity")
   maximumQuantity Int      @default(0) @map("qty_limit")
   reorderLevel    Int      @default(0) @map("reorder_level")
   modifiedAt      DateTime @default(now()) @updatedAt @map("modified_at")
@@ -100,6 +108,8 @@ model Inventory {
   product         Product  @relation(fields: [productId], references: [productId])
   supplierId      Int      @map("supplier_id")
   supplier        Supplier @relation(fields: [supplierId], references: [supplierId])
+
+  @@index([reservedQuantity])
 }
 
 model Order {
@@ -112,6 +122,7 @@ model Order {
   userId        Int
   user          User        @relation(fields: [userId], references: [userId])
   orderItems    OrderItem[]
+  reservation   Reservation?
 
   @@index([orderStatus])
 }
@@ -187,23 +198,35 @@ model ProductImage {
 }
 
 
+// Reservations are kept as history; only one ACTIVE reservation per user is allowed
+// (enforced by the partial unique index "Reservation_userId_active_key" in migration 20261105100000).
 model Reservation {
-  reservationId  Int       @id @unique @default(autoincrement()) @map("reservation_id")
-  userId    Int  
-  user      User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  items     ReservationItem[]
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
+  reservationId  Int               @id @unique @default(autoincrement()) @map("reservation_id")
+  userId         Int
+  user           User              @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  items          ReservationItem[]
+  status         ReservationStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
+  expiresAt      DateTime          @map("expiresAt")
+  releasedAt     DateTime?         @map("released_at")
+  orderId        Int?              @unique @map("order_id")
+  order          Order?            @relation(fields: [orderId], references: [orderId], onDelete: SetNull)
+
+  @@index([expiresAt])
+  @@index([status, expiresAt])
+  @@index([userId, status])
 }
 
 model ReservationItem {
   reservationItemId Int    @id @unique @default(autoincrement()) @map("reservation_item_id")
   reservationId     Int
   reservation       Reservation @relation(fields: [reservationId], references: [reservationId], onDelete: Cascade)
-  productId         Int
-  product           Product @relation(fields: [productId], references: [productId])
-  quantity          Int
-  createdAt         DateTime @default(now()) @map("created_at")
+  productId    Int
+  product      Product @relation(fields: [productId], references: [productId])
+  quantity     Int
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@unique([reservationId, productId])
 }
+
