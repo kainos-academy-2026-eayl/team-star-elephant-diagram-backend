@@ -118,6 +118,25 @@ test('requirePermission denies admins whose stored role is not recognised', () =
 const ROLE_IDS = { SuperAdmin: 1, Admin: 2, InventoryManager: 3, FinanceManager: 4, CustomerService: 5 };
 const admins = new Map();
 const adminCalls = { orders: 0, inventory: 0 };
+let orderStatus = 'PENDING';
+const orderRecord = () => ({
+	orderId: 42,
+	orderPlacedAt: new Date('2026-04-02T10:00:00Z'),
+	orderStatus,
+	cost: '12.50',
+	modifiedAt: new Date('2026-04-02T10:00:00Z'),
+	user: {
+		userId: 1,
+		forename: 'Ada',
+		surname: 'Lovelace',
+		email: 'ada@example.com',
+		addressLine1: '1 Analytical Engine Way',
+		addressLine2: '',
+		city: 'London',
+		postcode: 'N1 1AA',
+	},
+	orderItems: [{ productId: 1, quantity: 1, product: { name: 'Green tea', price: '3.50' } }],
+});
 const adminRepository = {
 	async findByEmail() {
 		return null;
@@ -141,6 +160,18 @@ const adminRepository = {
 			lowStockLines: 2,
 			recentStockChanges: [{ product: 'Green tea', quantity: 40, modifiedAt: new Date('2026-10-01T09:00:00Z') }],
 		};
+	},
+	async listOrders() {
+		const { orderId, orderPlacedAt, orderStatus, cost, user } = orderRecord();
+		return { orders: [{ orderId, orderPlacedAt, orderStatus, cost, user }], total: 1 };
+	},
+	async findOrderById(orderId) {
+		return orderId === 42 ? orderRecord() : null;
+	},
+	async updateOrderStatus(orderId, from, to) {
+		if (orderId !== 42 || orderStatus !== from) return false;
+		orderStatus = to;
+		return true;
 	},
 };
 
@@ -245,10 +276,17 @@ beforeEach(() => {
 	adminCalls.orders = 0;
 	adminCalls.inventory = 0;
 	userListCalls = 0;
+	orderStatus = 'PENDING';
 });
 
 const call = (method, path, token) =>
 	fetch(`${url}${path}`, { method, headers: token ? { authorization: `Bearer ${token}` } : {} });
+
+const callWithBody = (method, path, token, body) => {
+	const headers = { 'content-type': 'application/json' };
+	if (token) headers.authorization = ['Bearer', token].join(' ');
+	return fetch(`${url}${path}`, { method, headers, body: JSON.stringify(body) });
+};
 
 const ROUTES = [
 	['GET', '/admin/users', 'users:view'],
@@ -257,22 +295,31 @@ const ROUTES = [
 	['POST', '/admin/users/1/reactivate', 'users:reactivate'],
 	['GET', '/admin/baskets', 'baskets:view'],
 	['GET', '/admin/baskets/123', 'baskets:view'],
+	['GET', '/admin/orders', 'orders:view'],
+	['GET', '/admin/orders/42', 'orders:view'],
+	['POST', '/admin/orders/42/status', 'orders:update', { status: 'PROCESSING' }],
 ];
 
 for (const role of Object.keys(ROLE_IDS)) {
 	test(`${role} can only reach the admin endpoints its permissions allow`, async () => {
-		for (const [method, path, permission] of ROUTES) {
+		for (const [method, path, permission, body] of ROUTES) {
 			const allowed = role === 'SuperAdmin' || EXPECTED[role].includes(permission);
-			const response = await call(method, path, roleTokens[role]);
+			const response = body
+				? await callWithBody(method, path, roleTokens[role], body)
+				: await call(method, path, roleTokens[role]);
 			assert.equal(response.status, allowed ? 200 : 403, `${role} ${method} ${path}`);
 			if (!allowed) assert.deepEqual(await response.json(), { error: 'Forbidden' });
 		}
+		assert.equal(orderStatus, role === 'SuperAdmin' || EXPECTED[role].includes('orders:update') ? 'PROCESSING' : 'PENDING');
 	});
 }
 
 test('protected admin endpoints still require authentication (401 before 403)', async () => {
-	for (const [method, path] of ROUTES) {
-		assert.equal((await call(method, path)).status, 401, `${method} ${path}`);
+	for (const [method, path, , body] of ROUTES) {
+		const response = body
+			? await callWithBody(method, path, undefined, body)
+			: await call(method, path);
+		assert.equal(response.status, 401, `${method} ${path}`);
 	}
 });
 

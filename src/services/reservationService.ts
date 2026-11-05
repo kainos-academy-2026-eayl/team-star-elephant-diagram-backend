@@ -171,7 +171,13 @@ export async function convertReservationToOrder(userId: number) {
         userId,
         cost,
         orderStatus: 'PROCESSING',
-        orderItems: { create: reservation.items.map((item) => ({ productId: item.productId, quantity: item.quantity })) },
+        orderItems: {
+          create: reservation.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.product.price,
+          })),
+        },
       },
       include: { orderItems: true },
     });

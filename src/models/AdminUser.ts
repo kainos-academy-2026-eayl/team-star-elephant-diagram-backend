@@ -75,3 +75,36 @@ export interface AdminDashboardResponse {
     newUsers: Array<{ name: string; email: string; joined: string }>;
     stockChanges: Array<{ product: string; amount: string; reason: string }>;
 }
+
+// Admin order management API response shapes (KAN-101). Status values are the Prisma OrderStatus enum names.
+export interface AdminOrderSummary {
+    orderId: number;
+    customer: { id: number; name: string; email: string };
+    status: string;
+    orderDate: string;
+    totalCost: number;
+}
+
+export interface AdminOrderListResponse {
+    orders: AdminOrderSummary[];
+    pagination: { page: number; pageSize: number; totalPages: number; totalOrders: number };
+}
+
+export interface AdminOrderDetailsResponse {
+    order: {
+        orderId: number;
+        status: string;
+        orderDate: string;
+        lastUpdated: string;
+        customer: {
+            id: number;
+            name: string;
+            email: string;
+            address: { line1: string; line2: string; city: string; postcode: string };
+        };
+        items: Array<{ productId: number; productName: string; quantity: number; unitPrice: number; itemTotal: number }>;
+        itemCount: number;
+        orderTotal: number;
+        allowedTransitions: string[];
+    };
+}

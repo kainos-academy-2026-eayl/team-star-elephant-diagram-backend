@@ -1,4 +1,5 @@
 import argon2 from 'argon2';
+import type { OrderStatus } from '@prisma/client';
 import {
 	DASHBOARD_BY_ROLE,
 	hasPermission,
@@ -12,20 +13,44 @@ import type {
 	AdminBasketListResponse,
 	AdminBasketSummary,
 	AdminDashboardResponse,
+	AdminOrderDetailsResponse,
+	AdminOrderListResponse,
 	AdminUserDetailsResponse,
 	AdminUserListResponse,
 	AdminUserStatusResponse,
 	AdminUserSummary,
 } from '../models/AdminUser';
 import type { UserStatus } from '../models/user';
-import type { adminRepository } from '../repositories/adminRepository';
+import type { adminRepository, AdminOrderSummaryRecord } from '../repositories/adminRepository';
 import type { UserRepository, UserSummaryRecord } from '../repositories/userRepository';
 import type { BasketService, PricedBasketRecord } from './basketService';
 import type { LoginRequest } from '../validators/loginSchema';
 
 const ADMIN_USERS_PAGE_SIZE = 20;
 const ADMIN_BASKETS_PAGE_SIZE = 20;
+const ADMIN_ORDERS_PAGE_SIZE = 20;
 const ADMIN_USER_RECENT_ORDERS = 5;
+
+// Fulfilment workflow: PENDING -> PROCESSING -> SHIPPED -> DELIVERED; cancellation only before shipping.
+export const ORDER_STATUS_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> = {
+	PENDING: ['PROCESSING', 'CANCELLED'],
+	PROCESSING: ['SHIPPED', 'CANCELLED'],
+	SHIPPED: ['DELIVERED'],
+	DELIVERED: [],
+	CANCELLED: [],
+};
+
+export const canTransitionOrder = (from: OrderStatus, to: OrderStatus) => ORDER_STATUS_TRANSITIONS[from].includes(to);
+
+export class InvalidOrderStatusTransitionError extends Error {
+	constructor(
+		readonly from: OrderStatus,
+		readonly to: OrderStatus,
+	) {
+		super(`Cannot change order status from ${from} to ${to}`);
+		this.name = 'InvalidOrderStatusTransitionError';
+	}
+}
 const DASHBOARD_NEW_USERS = 5;
 
 export class InvalidCredentialsError extends Error {
@@ -105,6 +130,17 @@ const toBasketSummary = (basket: PricedBasketRecord): AdminBasketSummary => ({
 	total: formatPrice(basket.subtotal),
 	lastActivity: formatDate(basket.updatedAt),
 	status: basketStatus(basket),
+});
+
+const toMoney = (amount: { toString(): string }) => Number(amount.toString());
+const roundMoney = (amount: number) => Math.round(amount * 100) / 100;
+
+const toOrderSummary = (order: AdminOrderSummaryRecord) => ({
+	orderId: order.orderId,
+	customer: { id: order.user.userId, name: `${order.user.forename} ${order.user.surname}`, email: order.user.email },
+	status: order.orderStatus,
+	orderDate: order.orderPlacedAt.toISOString(),
+	totalCost: toMoney(order.cost),
 });
 
 export class AdminUserService {
@@ -231,6 +267,85 @@ export class AdminUserService {
 				total: summary.total,
 			},
 		};
+	}
+
+	async listOrders({
+		search,
+		status,
+		page = 1,
+	}: {
+		search?: string | undefined;
+		status?: OrderStatus | undefined;
+		page?: number | undefined;
+	}): Promise<AdminOrderListResponse> {
+		const pageSize = ADMIN_ORDERS_PAGE_SIZE;
+		const { orders, total } = await this.admins.listOrders({
+			search,
+			status,
+			skip: (page - 1) * pageSize,
+			take: pageSize,
+		});
+		return {
+			orders: orders.map(toOrderSummary),
+			pagination: {
+				page,
+				pageSize,
+				totalPages: Math.max(1, Math.ceil(total / pageSize)),
+				totalOrders: total,
+			},
+		};
+	}
+
+	async getOrderDetails(orderId: number): Promise<AdminOrderDetailsResponse | null> {
+		const order = await this.admins.findOrderById(orderId);
+		if (!order) return null;
+		const { customer, ...summary } = toOrderSummary(order);
+		return {
+			order: {
+				orderId: summary.orderId,
+				status: summary.status,
+				orderDate: summary.orderDate,
+				lastUpdated: order.modifiedAt.toISOString(),
+				customer: {
+					...customer,
+					address: {
+						line1: order.user.addressLine1,
+						line2: order.user.addressLine2,
+						city: order.user.city,
+						postcode: order.user.postcode,
+					},
+				},
+				items: order.orderItems.map((item) => {
+					const unitPrice = toMoney(item.product.price);
+					return {
+						productId: item.productId,
+						productName: item.product.name,
+						quantity: item.quantity,
+						unitPrice,
+						itemTotal: roundMoney(unitPrice * item.quantity),
+					};
+				}),
+				itemCount: order.orderItems.reduce((count, item) => count + item.quantity, 0),
+				orderTotal: summary.totalCost,
+				allowedTransitions: [...ORDER_STATUS_TRANSITIONS[order.orderStatus]],
+			},
+		};
+	}
+
+	// Returns null when the order does not exist; throws InvalidOrderStatusTransitionError for disallowed changes.
+	async updateOrderStatus(orderId: number, status: OrderStatus): Promise<AdminOrderDetailsResponse | null> {
+		const order = await this.admins.findOrderById(orderId);
+		if (!order) return null;
+		if (!canTransitionOrder(order.orderStatus, status)) {
+			throw new InvalidOrderStatusTransitionError(order.orderStatus, status);
+		}
+		if (!(await this.admins.updateOrderStatus(orderId, order.orderStatus, status))) {
+			// Status changed concurrently; report against the latest stored status.
+			const latest = await this.admins.findOrderById(orderId);
+			if (!latest) return null;
+			throw new InvalidOrderStatusTransitionError(latest.orderStatus, status);
+		}
+		return this.getOrderDetails(orderId);
 	}
 
 	async setUserStatus(userId: number, status: UserStatus): Promise<AdminUserStatusResponse | null> {

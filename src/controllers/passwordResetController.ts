@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { z } from 'zod';
+import { rateLimitMax } from '../middleware/authRateLimiter';
 import {
 	InvalidPasswordResetError,
 	PasswordResetUnavailableError,
@@ -16,7 +17,7 @@ export function passwordResetController(service: PasswordResetService): Router {
 	});
 	const limiter = rateLimit({
 		windowMs: 15 * 60 * 1000,
-		limit: 10,
+		limit: rateLimitMax(10),
 		standardHeaders: 'draft-8',
 		legacyHeaders: false,
 		message: { error: 'Too many password reset attempts. Please try again later.' },
