@@ -5,7 +5,8 @@ import {
   convertReservationToOrder,
   cleanupExpiredReservations,
   getUserReservation,
-  getAvailableQuantity
+  getAvailableQuantity,
+  ReservationError,
 } from '../services/reservationService';
 
 declare module 'express-serve-static-core' {
@@ -17,144 +18,96 @@ declare module 'express-serve-static-core' {
 function getAuthenticatedCustomerId(res: Response): number | null {
   const userId = res.locals.customerId;
   if (typeof userId !== 'number') {
-    res.status(401).json({ message: 'Authentication required' });
+    res.status(401).json({ error: 'Authentication required' });
     return null;
   }
   return userId;
 }
 
+function sendError(res: Response, error: unknown, fallback: string): void {
+  if (error instanceof ReservationError) {
+    res.status(error.status).json({ error: error.message });
+    return;
+  }
+  console.error(fallback, error);
+  res.status(500).json({ error: fallback });
+}
+
 export class ReservationController {
-  /**
-   * POST /api/checkout/reserve
-   * Creates a reservation from user's basket when proceeding to checkout
-   */
+  /** POST /checkout/reserve - reserve basket stock for 15 minutes when continuing to checkout */
   static async createCheckoutReservation(_req: Request, res: Response) {
+    const userId = getAuthenticatedCustomerId(res);
+    if (userId === null) return;
     try {
-      const userId = getAuthenticatedCustomerId(res);
-      if (userId === null) return;
-
-      const result = await createCheckoutReservation(userId);
-      res.status(201).json(result);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error creating reservation';
-      res.status(400).json({ success: false, message });
+      res.status(201).json(await createCheckoutReservation(userId));
+    } catch (error) {
+      sendError(res, error, 'Error creating reservation');
     }
   }
 
-  /**
-   * GET /api/reservations/active
-   * Gets the user's active reservation with remaining time
-   */
+  /** GET /reservations/active */
   static async getActiveReservation(_req: Request, res: Response) {
+    const userId = getAuthenticatedCustomerId(res);
+    if (userId === null) return;
     try {
-      const userId = getAuthenticatedCustomerId(res);
-      if (userId === null) return;
-
       const reservation = await getUserReservation(userId);
-
       if (!reservation) {
-        return res.status(404).json({
-          message: 'No active reservation',
-          reservation: null
-        });
+        res.status(404).json({ error: 'No active reservation', reservation: null });
+        return;
       }
-
       res.json({ reservation });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error fetching reservation';
-      res.status(400).json({ message });
+    } catch (error) {
+      sendError(res, error, 'Error fetching reservation');
     }
   }
 
-  /**
-   * POST /api/reservations/cancel
-   * Cancels the user's reservation and returns stock
-   * Called when user clicks "continue shopping"
-   */
+  /** POST /reservations/cancel - continue shopping: release reservation and return stock */
   static async cancelReservation(_req: Request, res: Response) {
+    const userId = getAuthenticatedCustomerId(res);
+    if (userId === null) return;
     try {
-      const userId = getAuthenticatedCustomerId(res);
-      if (userId === null) return;
-
       const reservation = await getUserReservation(userId);
-
       if (!reservation) {
-        return res.status(404).json({
-          message: 'No active reservation to cancel'
-        });
+        res.status(404).json({ error: 'No active reservation to cancel' });
+        return;
       }
-
-      const result = await cancelReservation(reservation.reservationId);
-      res.json(result);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error cancelling reservation';
-      res.status(400).json({ message });
+      res.json(await cancelReservation(reservation.reservationId));
+    } catch (error) {
+      sendError(res, error, 'Error cancelling reservation');
     }
   }
 
-  /**
-   * POST /api/orders/from-reservation
-   * Converts user's reservation to an order after successful payment
-   */
-  static async convertToOrder(req: Request, res: Response) {
+  /** POST /orders/from-reservation - payment complete: delete reservation and create PROCESSING order */
+  static async convertToOrder(_req: Request, res: Response) {
+    const userId = getAuthenticatedCustomerId(res);
+    if (userId === null) return;
     try {
-      const userId = getAuthenticatedCustomerId(res);
-      if (userId === null) return;
-      const { totalCost, paymentMethod } = req.body;
-
-      if (!totalCost) {
-        return res.status(400).json({ message: 'totalCost is required' });
-      }
-
-      const reservation = await getUserReservation(userId);
-
-      if (!reservation) {
-        return res.status(404).json({
-          message: 'No active reservation. Please proceed to checkout again.'
-        });
-      }
-
-      const result = await convertReservationToOrder(
-        reservation.reservationId,
-        userId,
-        totalCost,
-        paymentMethod
-      );
-
-      res.status(201).json(result);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error creating order from reservation';
-      res.status(400).json({ message });
+      res.status(201).json(await convertReservationToOrder(userId));
+    } catch (error) {
+      sendError(res, error, 'Error creating order from reservation');
     }
   }
 
-  /**
-   * GET /api/products/:productId/available-quantity
-   * Gets available quantity for a product (accounting for reservations)
-   */
+  /** GET /products/:productId/available-quantity */
   static async getAvailableQuantity(req: Request, res: Response) {
+    const productId = Number(req.params.productId);
+    if (!Number.isInteger(productId) || productId <= 0) {
+      res.status(400).json({ error: 'Invalid product id' });
+      return;
+    }
     try {
-      const { productId } = req.params;
-      const available = await getAvailableQuantity(Number(productId));
-
-      res.json({ productId: Number(productId), availableQuantity: available });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error fetching available quantity';
-      res.status(400).json({ message });
+      res.json({ productId, availableQuantity: await getAvailableQuantity(productId) });
+    } catch (error) {
+      sendError(res, error, 'Error fetching available quantity');
     }
   }
 
-  /**
-   * POST /admin/cleanup-reservations
-   * Manually cleanup expired reservations
-   */
+  /** POST /admin/cleanup-reservations */
   static async cleanupExpiredReservations(_req: Request, res: Response) {
     try {
-      const result = await cleanupExpiredReservations();
-      res.json(result);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Error cleaning up reservations';
-      res.status(400).json({ message });
+      res.json(await cleanupExpiredReservations());
+    } catch (error) {
+      sendError(res, error, 'Error cleaning up reservations');
     }
   }
 }

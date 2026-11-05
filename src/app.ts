@@ -22,6 +22,8 @@ import { prismaRefreshSessionRepository, type RefreshSessionRepository } from '.
 import { prismaPasswordResetRepository, type PasswordResetRepository } from './repositories/passwordResetRepository';
 import { createConsoleResetDelivery, PasswordResetService, type PasswordResetDelivery } from './services/passwordResetService';
 import { passwordResetController } from './controllers/passwordResetController';
+import { createReservationRouter } from './controllers/reservationRouter';
+import { reservationCleanupMiddleware } from './middleware/reservationCleanup';
 import prisma from './prismaClient';
 
 export interface AppDependencies {
@@ -76,7 +78,9 @@ export function createApp({
 
 	const productService = new ProductService(productsRepository);
 
+	app.use(reservationCleanupMiddleware);
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
+	app.use(createReservationRouter(tokenService));
 	app.use('/products', createProductRouter(productService));
 	app.use('/basket', createBasketRouter(basketService, tokenService));
 	app.use(adminController(adminService, tokenService, sessions, productService, authRateLimitOptions));

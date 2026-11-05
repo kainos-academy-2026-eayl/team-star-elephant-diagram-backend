@@ -21,6 +21,13 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum ReservationStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  CONVERTED
+}
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
@@ -44,7 +51,7 @@ model User {
   orders         Order[]
   paymentDetails PaymentDetail[]
   basket        Basket?
-  reservation   Reservation?
+  reservations  Reservation[]
 }
 
 model Product {
@@ -114,6 +121,7 @@ model Order {
   userId        Int
   user          User        @relation(fields: [userId], references: [userId])
   orderItems    OrderItem[]
+  reservation   Reservation?
 
   @@index([orderStatus])
 }
@@ -188,16 +196,24 @@ model ProductImage {
   @@unique([productId, position])
 }
 
+// Reservations are kept as history; only one ACTIVE reservation per user is allowed
+// (enforced by the partial unique index "Reservation_userId_active_key" in migration 20261105100000).
 model Reservation {
-  reservationId  Int       @id @unique @default(autoincrement()) @map("reservation_id")
-  userId         Int       @unique
-  user           User      @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  reservationId  Int               @id @unique @default(autoincrement()) @map("reservation_id")
+  userId         Int
+  user           User              @relation(fields: [userId], references: [userId], onDelete: Cascade)
   items          ReservationItem[]
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at")
-  expiresAt      DateTime  @map("expiresAt")
+  status         ReservationStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
+  expiresAt      DateTime          @map("expiresAt")
+  releasedAt     DateTime?         @map("released_at")
+  orderId        Int?              @unique @map("order_id")
+  order          Order?            @relation(fields: [orderId], references: [orderId], onDelete: SetNull)
 
   @@index([expiresAt])
+  @@index([status, expiresAt])
+  @@index([userId, status])
 }
 
 model ReservationItem {
