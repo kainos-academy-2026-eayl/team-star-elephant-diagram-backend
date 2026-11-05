@@ -133,20 +133,20 @@ export const prismaAdminUserRepository: adminRepository = {
 	},
 	async getInventoryMetrics() {
 		const [stock, lowStockLines, recent] = await prisma.$transaction([
-			prisma.inventory.aggregate({ _sum: { quantity: true } }),
-			prisma.inventory.count({ where: { quantity: { lte: prisma.inventory.fields.reorderLevel } } }),
-			prisma.inventory.findMany({
-				select: { quantity: true, modifiedAt: true, product: { select: { name: true } } },
-				orderBy: [{ modifiedAt: 'desc' }, { inventoryId: 'desc' }],
+			prisma.product.aggregate({ _sum: { stockQuantity: true } }),
+			prisma.product.count({ where: { stockStatus: { in: ['LOW_STOCK', 'OUT_OF_STOCK'] } } }),
+			prisma.product.findMany({
+				select: { stockQuantity: true, modifiedAt: true, name: true },
+				orderBy: [{ modifiedAt: 'desc' }, { productId: 'desc' }],
 				take: DASHBOARD_RECENT_ROWS,
 			}),
 		]);
 		return {
-			unitsInStock: stock._sum.quantity ?? 0,
+			unitsInStock: stock._sum.stockQuantity ?? 0,
 			lowStockLines,
 			recentStockChanges: recent.map((row) => ({
-				product: row.product.name,
-				quantity: row.quantity,
+				product: row.name,
+				quantity: row.stockQuantity,
 				modifiedAt: row.modifiedAt,
 			})),
 		};

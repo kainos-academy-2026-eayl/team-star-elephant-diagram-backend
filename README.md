@@ -96,6 +96,67 @@ re-running the seed is safe.
 
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
 
+## Admin inventory (KAN-71)
+
+All `/api/admin/inventory` endpoints require an admin Bearer access JWT and the
+**current stored** `InventoryManager` or `WarehouseStaff` role. Other roles,
+including SuperAdmin, are denied on this API. Only InventoryManager can change
+thresholds. Existing admin resource permissions elsewhere are unchanged.
+
+| Method | Path | Payload/query |
+| --- | --- | --- |
+| GET | `/api/admin/inventory` | `page=1`, `limit=20` (max 100), `search` (name/SKU), `status` |
+| GET | `/api/admin/inventory/:id` | Product and latest 20 adjustments |
+| PATCH | `/api/admin/inventory/:id/stock` | `{ "adjustment": -4, "reason": "Damaged", "notes": "Packaging destroyed" }` |
+| PATCH | `/api/admin/inventory/:id/threshold` | `{ "lowStockThreshold": 10 }` |
+| GET | `/api/admin/inventory/:id/history` | `page=1`, `limit=20` (max 100), newest first |
+
+Lists return `{ items, totalItems, totalPages, currentPage }`. Product DTOs retain
+the existing integer `productId` and `modifiedAt` fields (not `id`/`updatedAt`).
+History includes integer `adjustedById` referencing **AdminUser**, not customer
+User, along with product, delta, before/after stock, reason, notes and timestamp.
+SKU defaults to a unique `SKU-<uuid>` for existing and newly created products.
+Stock and thresholds are nonnegative PostgreSQL integers; adjustments are signed
+integers and reasons are trimmed, 3–255 characters. Unknown body fields are rejected.
+
+The migration backfills product stock from the sum of supplier inventory and
+thresholds from the maximum existing reorder level. Database triggers keep
+product totals/status synchronized on inventory insert/update/delete (including
+checkout, reservation releases and seeds). Zero stock is OUT_OF_STOCK; positive
+stock at or below threshold is LOW_STOCK; otherwise IN_STOCK. Thresholds now
+belong to products; legacy supplier reorder levels are not used by admin metrics.
+
+Staff adjustments run in a serializable Prisma transaction, locking the product
+and supplier inventory, and always creating an audit record before commit.
+Removal draws from supplier rows in ID order without consuming reserved stock.
+Addition uses the first inventory row, or creates one from an assigned product
+supplier; assign a supplier before adding stock to an unstocked product.
+Checkout/sale changes retain their existing reservation/order records rather than
+being represented as staff adjustments. Serialization/deadlock conflicts are
+retried up to three times. Reads use consistent repeatable-read snapshots.
+
+Responses: 400 invalid input/negative stock/reserved stock/missing supplier,
+401 absent/invalid JWT or deleted staff account, 403 disallowed current role
+(including a valid customer JWT), 404 missing product, 409 exhausted concurrent
+write retries, and 500 unexpected persistence errors. Failures are logged without
+returning internal database details. No staff stock update can commit without its
+audit record; audit foreign keys prevent deletion of referenced staff/products.
+
+Apply with `npm run db:deploy` and regenerate using `npm run db:generate`.
+Existing migration history has duplicate reservation-table creation in
+`20261104110202_add_reservation_tables` and `20261104150000_add_reservation_tables`.
+That pre-existing issue must be resolved separately before replaying all migrations
+on an empty database. The inventory migration was verified against a baseline of
+the preceding schema, including populated supplier inventory, in an isolated
+local database; shared development data was not modified.
+Database integration tests require a **dedicated local** migrated database:
+
+```sh
+INVENTORY_TEST_DATABASE_URL=postgresql://dev:dev@localhost:5432/inventory_test_kan71 npm test
+```
+
+The integration test only deletes its own fixtures. Never use a shared database.
+
 ## Authentication
 
 Customer and admin authentication use standard HS256 JWTs through `jose`:

@@ -27,6 +27,7 @@ const EXPECTED = {
 	Admin: ['users:view', 'users:suspend', 'users:reactivate', 'baskets:view', 'orders:view', 'orders:update', 'inventory:view', 'finance:view'],
 	CustomerService: ['users:view', 'baskets:view', 'orders:view', 'inventory:view'],
 	InventoryManager: ['inventory:view', 'inventory:create', 'inventory:update', 'inventory:delete', 'orders:view'],
+	WarehouseStaff: ['inventory:view', 'inventory:update'],
 	FinanceManager: ['finance:view', 'finance:update', 'orders:view', 'inventory:view'],
 };
 

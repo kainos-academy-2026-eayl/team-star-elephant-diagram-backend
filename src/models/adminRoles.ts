@@ -1,4 +1,4 @@
-export const ADMIN_ROLES = ['SuperAdmin', 'Admin', 'InventoryManager', 'FinanceManager', 'CustomerService'] as const;
+export const ADMIN_ROLES = ['SuperAdmin', 'Admin', 'InventoryManager', 'WarehouseStaff', 'FinanceManager', 'CustomerService'] as const;
 
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
@@ -7,6 +7,7 @@ export const DASHBOARD_BY_ROLE: Record<AdminRole, string> = {
     SuperAdmin: 'super-admin',
     Admin: 'admin',
     InventoryManager: 'inventory',
+    WarehouseStaff: 'inventory',
     FinanceManager: 'finance',
     CustomerService: 'customer-service',
 };
@@ -49,6 +50,9 @@ export const ROLE_PERMISSIONS: Readonly<Record<Exclude<AdminRole, 'SuperAdmin'>,
     InventoryManager: {
         inventory: ['view', 'create', 'update', 'delete'],
         orders: ['view'],
+    },
+    WarehouseStaff: {
+        inventory: ['view', 'update'],
     },
     FinanceManager: {
         finance: ['view', 'update'],
