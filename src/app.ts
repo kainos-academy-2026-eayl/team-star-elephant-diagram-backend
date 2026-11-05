@@ -105,7 +105,6 @@ export function createApp({
 	app.use('/basket', createBasketRouter(basketService, tokenService));
 	app.use('/checkout', createCheckoutRouter(reservationService, tokenService));
 	app.use('/payment', createPaymentRouter(orderService, tokenService));
-	app.use(adminController(adminService, tokenService, sessions, authRateLimitOptions));
 	app.use(adminController(adminService, tokenService, sessions, productService, authRateLimitOptions));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
