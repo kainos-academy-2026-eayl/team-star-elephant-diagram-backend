@@ -116,6 +116,8 @@ SuperAdmin and InventoryManager have CRUD access; WarehouseStaff may view and
 update; other grants follow the existing permission matrix without duplication.
 The dashboard returns `inventoryPermissions` from that same permission utility
 and `inventorySummary` with separate total, low-stock and out-of-stock product counts.
+It also returns `basketPermissions` (`view/create/update/delete`); SuperAdmin
+and Admin can manage customer baskets, CustomerService can only view them.
 
 | Method | Path | Payload/query |
 | --- | --- | --- |
@@ -292,7 +294,13 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | `POST /admin/users/:id/reactivate` | Admin only. Sets the customer back to `active`. |
 | `POST /admin/users/:id/delete` | Requires `users:delete` (Admin or SuperAdmin). Permanently removes the customer, order items, orders, payment details, basket/items and customer refresh sessions in one transaction. Returns `{ deleted: true }`, or 404 if absent. Irreversible; no schema migration needed. |
 | `GET /admin/baskets?search=&page=` | Admin only. Lists customer baskets (20 per page), most recent activity first; `search` (or `q`) matches basket ID, customer name or email, case-insensitive. |
-| `GET /admin/baskets/:id` | Admin only. Basket details with customer, priced items and total; 404 for unknown IDs. |
+| `GET /admin/baskets/:id` | Admin only. Basket details with customer (including `id`), priced items and total; each item includes live `availableStock`, `maxQuantity` and `exceedsStock`. `products` lists in-stock products not yet in the basket. 404 for unknown IDs. |
+| `POST /admin/baskets` | Requires `baskets:create`. Body `{ email }`. Creates an empty basket for that customer: 201 `{ basketId }`; 404 unknown customer; 409 `{ code: 'exists', basketId }` if they already have one. |
+| `POST /admin/baskets/:id/items` | Requires `baskets:update`. Body `{ productId, quantity }`. Adds to the line, capped at available stock (inventory minus reservations) and 99; 409 `{ code: 'stock' }` when exceeded. Returns updated basket details. |
+| `PATCH /admin/baskets/:id/items/:productId` | Requires `baskets:update`. Body `{ quantity }` (1–99, ≤ available stock). Returns updated basket details; 404 if the product is not in the basket. |
+| `DELETE /admin/baskets/:id/items/:productId` | Requires `baskets:update`. Removes one line. Returns updated basket details. |
+| `DELETE /admin/baskets/:id/items` | Requires `baskets:update`. Empties the basket but keeps it. Returns updated basket details. |
+| `DELETE /admin/baskets/:id` | Requires `baskets:delete`. Deletes the basket and its items; `{ deleted: true }` or 404. |
 | `POST /admin/products` | Requires `inventory:create` (SuperAdmin, InventoryManager). JSON `imageURL` (http/https URL, ≤255), `name` (≤100), `description` (≤255), `category` (≤100), `price` (> 0, ≤ 99,999,999.99, max 2 decimals; number or numeric string). Returns 201 with the product and a `Location` header; 400 with field `details` on validation failure, 401 unauthenticated, 403 for other roles. |
 
 Unimplemented admin-account and permission-management dashboard controls are

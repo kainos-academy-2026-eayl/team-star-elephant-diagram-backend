@@ -57,15 +57,28 @@ export interface AdminBasketDetailsResponse {
         createdAt: string;
         lastActivity: string;
         status: string;
-        customer: { name: string; email: string };
-        items: Array<{ productName: string; quantity: number; unitPrice: string; totalPrice: string }>;
+        customer: { id: number; name: string; email: string };
+        items: Array<{
+            productId: number;
+            productName: string;
+            quantity: number;
+            unitPrice: string;
+            totalPrice: string;
+            // Sellable stock right now; quantity above this cannot be fulfilled at checkout.
+            availableStock: number;
+            maxQuantity: number;
+            exceedsStock: boolean;
+        }>;
         itemCount: number;
         total: string;
     };
+    // Products an admin can add, with live stock so the picker reflects inventory.
+    products: Array<{ productId: number; name: string; unitPrice: string; availableStock: number; maxQuantity: number }>;
 }
 // Role-scoped admin dashboard; must match frontend AdminDashboard in src/services/adminService.ts.
 export interface AdminDashboardResponse {
     inventoryPermissions: { view: boolean; create: boolean; update: boolean; delete: boolean };
+    basketPermissions: { view: boolean; create: boolean; update: boolean; delete: boolean };
     inventorySummary: { totalProducts: number; lowStockProducts: number; outOfStockProducts: number } | null;
     lowStock: {
         total: number;

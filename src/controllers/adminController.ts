@@ -6,6 +6,7 @@ import { createAuthRateLimiter, rateLimitMax } from '../middleware/authRateLimit
 import { DASHBOARD_BY_ROLE, type AdminAction, type AdminResource } from '../models/adminRoles';
 import { requireAdmin, requirePermission } from '../middleware/requireAdmin';
 import {
+	AdminBasketError,
 	InvalidCredentialsError,
 	InvalidOrderStatusTransitionError,
 	UnknownAdminRoleError,
@@ -16,6 +17,7 @@ import type { TokenService } from '../services/tokenService';
 import type { AuthSessionService } from '../services/authSessionService';
 import { loginSchema } from '../validators/loginSchema';
 import { createProductSchema } from '../validators/productSchema';
+import { addToBasketSchema, basketItemParamsSchema, updateBasketItemSchema } from '../validators/basketSchema';
 import { sendTokens } from './authController';
 
 const adminRateLimit = rateLimit({
@@ -45,6 +47,20 @@ const basketListQuerySchema = z
 		page: z.coerce.number().int().positive().max(100_000).optional(),
 	})
 	.transform(({ search, q, page }) => ({ search: search || q || undefined, page }));
+
+const basketCreateSchema = z.object({ email: z.string().trim().toLowerCase().pipe(z.email()).pipe(z.string().max(255)) });
+const basketItemCreateSchema = addToBasketSchema.extend({
+	quantity: addToBasketSchema.shape.quantity.unwrap(),
+});
+
+const BASKET_ERROR_STATUS: Record<AdminBasketError['code'], number> = {
+	not_found: 404,
+	customer_not_found: 404,
+	product_not_found: 404,
+	item_not_found: 404,
+	exists: 409,
+	stock: 409,
+};
 
 // Case-insensitive so form values like "shipped" are accepted.
 const orderStatusSchema = z.preprocess(
@@ -317,6 +333,144 @@ export function adminController(
 			} catch (error) {
 				console.error('Admin basket lookup failed', error);
 				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	const sendBasketError = (res: Response, error: unknown, action: string): void => {
+		if (error instanceof AdminBasketError) {
+			res.status(BASKET_ERROR_STATUS[error.code]).json({
+				error: error.message,
+				code: error.code,
+				...(error.basketId === undefined ? {} : { basketId: error.basketId }),
+			});
+			return;
+		}
+		console.error(`Admin basket ${action} failed`, error);
+		res.status(500).json({ error: 'Internal server error' });
+	};
+
+	const invalid = (res: Response, message: string, error: z.ZodError): void => {
+		res.status(400).json({ error: message, details: z.flattenError(error).fieldErrors });
+	};
+
+	router.post(
+		'/admin/baskets',
+		...authorize('baskets', 'create'),
+		async (req: Request, res: Response) => {
+			const input = basketCreateSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				invalid(res, 'Invalid customer email', input.error);
+				return;
+			}
+			try {
+				const { basketId } = await adminService.createBasket(input.data.email);
+				res.status(201).location(`/admin/baskets/${basketId}`).set('Cache-Control', 'no-store').json({ basketId });
+			} catch (error) {
+				sendBasketError(res, error, 'creation');
+			}
+		},
+	);
+
+	router.post(
+		'/admin/baskets/:id/items',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			if (!basketId.success) {
+				res.status(404).json({ error: 'Basket not found' });
+				return;
+			}
+			const input = basketItemCreateSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				invalid(res, 'Invalid basket item', input.error);
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(
+					await adminService.addBasketItem(basketId.data, input.data.productId, input.data.quantity),
+				);
+			} catch (error) {
+				sendBasketError(res, error, 'item add');
+			}
+		},
+	);
+
+	router.patch(
+		'/admin/baskets/:id/items/:productId',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			const params = basketItemParamsSchema.safeParse(req.params);
+			if (!basketId.success || !params.success) {
+				res.status(404).json({ error: 'Basket item not found' });
+				return;
+			}
+			const input = updateBasketItemSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				invalid(res, 'Invalid basket item', input.error);
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(
+					await adminService.updateBasketItem(basketId.data, params.data.productId, input.data.quantity),
+				);
+			} catch (error) {
+				sendBasketError(res, error, 'item update');
+			}
+		},
+	);
+
+	router.delete(
+		'/admin/baskets/:id/items/:productId',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			const params = basketItemParamsSchema.safeParse(req.params);
+			if (!basketId.success || !params.success) {
+				res.status(404).json({ error: 'Basket item not found' });
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(
+					await adminService.removeBasketItem(basketId.data, params.data.productId),
+				);
+			} catch (error) {
+				sendBasketError(res, error, 'item removal');
+			}
+		},
+	);
+
+	router.delete(
+		'/admin/baskets/:id/items',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			if (!basketId.success) {
+				res.status(404).json({ error: 'Basket not found' });
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(await adminService.clearBasket(basketId.data));
+			} catch (error) {
+				sendBasketError(res, error, 'clear');
+			}
+		},
+	);
+
+	router.delete(
+		'/admin/baskets/:id',
+		...authorize('baskets', 'delete'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			try {
+				if (!basketId.success || !(await adminService.deleteBasket(basketId.data))) {
+					res.status(404).json({ error: 'Basket not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json({ deleted: true });
+			} catch (error) {
+				sendBasketError(res, error, 'deletion');
 			}
 		},
 	);

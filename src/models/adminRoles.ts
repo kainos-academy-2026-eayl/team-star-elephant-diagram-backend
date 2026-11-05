@@ -19,7 +19,7 @@ export function isAdminRole(role: string): role is AdminRole {
 // Actions that can be granted on each admin portal resource.
 export const ADMIN_RESOURCE_ACTIONS = {
     users: ['view', 'create', 'update', 'delete', 'suspend', 'reactivate'],
-    baskets: ['view'],
+    baskets: ['view', 'create', 'update', 'delete'],
     orders: ['view', 'create', 'update', 'delete'],
     inventory: ['view', 'create', 'update', 'delete'],
     finance: ['view', 'create', 'update', 'delete'],
@@ -36,7 +36,7 @@ export type ResourcePermissions = { readonly [R in AdminResource]?: readonly Adm
 export const ROLE_PERMISSIONS: Readonly<Record<Exclude<AdminRole, 'SuperAdmin'>, ResourcePermissions>> = {
     Admin: {
         users: ['view', 'delete', 'suspend', 'reactivate'],
-        baskets: ['view'],
+        baskets: ['view', 'create', 'update', 'delete'],
         orders: ['view', 'update'],
         inventory: ['view'],
         finance: ['view'],
