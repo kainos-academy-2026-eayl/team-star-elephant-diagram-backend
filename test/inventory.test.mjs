@@ -14,6 +14,8 @@ import {
 	stockAdjustmentSchema, thresholdSchema,
 } from '../src/validators/inventorySchema.ts';
 
+process.env.JWT_SECRET = 'test-customer-secret-at-least-32-bytes';
+
 test('inventory validation enforces JSON integers, bounds, reason and strict bodies', () => {
 	for (const adjustment of [undefined, null, '1', 1.1, NaN, Infinity, 2_147_483_648, -2_147_483_648]) {
 		assert.equal(stockAdjustmentSchema.safeParse({ adjustment, reason: 'Stock count' }).success, false);
