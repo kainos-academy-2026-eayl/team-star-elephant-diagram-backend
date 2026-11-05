@@ -1,5 +1,4 @@
 import type { PrismaClient } from '@prisma/client';
-import type { ReservationRepository } from '../repositories/reservationRepository';
 import type { ProductRepository } from '../repositories/productRepository';
 import type { BasketRepository } from '../repositories/basketRepository';
 
@@ -26,7 +25,6 @@ export interface OrderRecord {
 export class OrderService {
 	constructor(
 		private readonly prisma: PrismaClient,
-		private readonly reservations: ReservationRepository,
 		private readonly products: ProductRepository,
 		private readonly baskets: BasketRepository,
 	) {}
@@ -36,49 +34,51 @@ export class OrderService {
 	}
 
 	async createOrderFromReservation(userId: number, reservationId: number): Promise<OrderRecord> {
-		// Get reservation
-		const reservation = await this.reservations.findByReservationId(reservationId);
-		if (!reservation) {
-			throw new ReservationNotFoundError(`Reservation ${reservationId} not found`);
-		}
-
-		if (reservation.userId !== userId) {
-			throw new OrderError('Reservation does not belong to this user');
-		}
-
-		// Load products for pricing
-		const productIds = [...reservation.items.keys()];
-		const productsData = await this.products.findByIds(productIds);
-		const productsMap = new Map(productsData.map((p) => [p.productId, p]));
-
-		// Calculate total cost and prepare order items
-		let totalCost = 0;
-		const orderItems: OrderItem[] = [];
-
-		for (const [productId, quantity] of reservation.items) {
-			const product = productsMap.get(productId);
-			if (!product) {
-				throw new OrderError(`Product ${productId} not found`);
+		const { order, orderItems } = await this.prisma.$transaction(async (tx) => {
+			const reservation = await tx.reservation.findUnique({
+				where: { reservationId },
+				include: { items: true },
+			});
+			if (!reservation) {
+				throw new ReservationNotFoundError(`Reservation ${reservationId} not found`);
 			}
 
-			const unitPriceNum = typeof product.price === 'number' ? product.price : Number(product.price);
-			const itemCost = unitPriceNum * quantity;
-			totalCost += itemCost;
+			if (reservation.userId !== userId) {
+				throw new OrderError('Reservation does not belong to this user');
+			}
 
-			orderItems.push({
-				productId,
-				quantity,
-				unitPrice: unitPriceNum,
-				productName: product.name,
+			const now = new Date();
+			if (reservation.status !== 'ACTIVE' || reservation.expiresAt <= now) {
+				throw new OrderError('Reservation is no longer active');
+			}
+
+			const { count } = await tx.reservation.updateMany({
+				where: { reservationId, userId, status: 'ACTIVE', expiresAt: { gt: now } },
+				data: { status: 'CONVERTED', releasedAt: now },
 			});
-		}
+			if (count === 0) {
+				throw new OrderError('Reservation is no longer active');
+			}
 
-		// Calculate shipping fee based on subtotal
-		const shippingFee = this.calculateShippingFee(totalCost);
+			const productIds = reservation.items.map((item) => item.productId);
+			const productsData = await this.products.findByIds(productIds);
+			const productsMap = new Map(productsData.map((product) => [product.productId, product]));
 
-		// Create order and order items in a transaction
-		const order = await this.prisma.$transaction(async (tx) => {
-			// Create order with shipping fee
+			let totalCost = 0;
+			const orderItems: OrderItem[] = [];
+
+			for (const { productId, quantity } of reservation.items) {
+				const product = productsMap.get(productId);
+				if (!product) {
+					throw new OrderError(`Product ${productId} not found`);
+				}
+
+				const unitPriceNum = typeof product.price === 'number' ? product.price : Number(product.price);
+				totalCost += unitPriceNum * quantity;
+				orderItems.push({ productId, quantity, unitPrice: unitPriceNum, productName: product.name });
+			}
+
+			const shippingFee = this.calculateShippingFee(totalCost);
 			const createdOrder = await tx.order.create({
 				data: {
 					userId,
@@ -88,7 +88,6 @@ export class OrderService {
 				},
 			});
 
-			// Create order items
 			for (const item of orderItems) {
 				await tx.orderItem.create({
 					data: {
@@ -99,7 +98,12 @@ export class OrderService {
 				});
 			}
 
-			return createdOrder;
+			await tx.reservation.update({
+				where: { reservationId },
+				data: { orderId: createdOrder.orderId },
+			});
+
+			return { order: createdOrder, orderItems };
 		});
 
 		// Clear basket
@@ -107,9 +111,6 @@ export class OrderService {
 		for (const productId of basketItems.keys()) {
 			await this.baskets.removeItem(String(userId), productId);
 		}
-
-		// Delete reservation
-		await this.reservations.delete(reservationId);
 
 		return {
 			orderId: order.orderId,

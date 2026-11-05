@@ -100,7 +100,7 @@ export function createApp({
 		productsRepository,
 		basketRepository,
 	);
-	const orderService = new OrderService(prisma, reservationRepository, productsRepository, basketRepository);
+	const orderService = new OrderService(prisma, productsRepository, basketRepository);
 
 	app.use(reservationCleanupMiddleware);
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
