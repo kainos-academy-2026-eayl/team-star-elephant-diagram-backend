@@ -108,8 +108,21 @@ model Inventory {
   product         Product  @relation(fields: [productId], references: [productId])
   supplierId      Int      @map("supplier_id")
   supplier        Supplier @relation(fields: [supplierId], references: [supplierId])
+  reservationAllocations ReservationInventoryAllocation[]
 
   @@index([reservedQuantity])
+}
+
+model ReservationInventoryAllocation {
+  allocationId      Int             @id @default(autoincrement()) @map("allocation_id")
+  reservationItemId Int             @map("reservation_item_id")
+  reservationItem   ReservationItem @relation(fields: [reservationItemId], references: [reservationItemId], onDelete: Cascade)
+  inventoryId       Int             @map("inventory_id")
+  inventory         Inventory       @relation(fields: [inventoryId], references: [inventoryId], onDelete: Restrict)
+  quantity          Int
+
+  @@unique([reservationItemId, inventoryId])
+  @@index([inventoryId])
 }
 
 model Order {
@@ -226,7 +239,7 @@ model ReservationItem {
   product      Product @relation(fields: [productId], references: [productId])
   quantity     Int
   createdAt    DateTime @default(now()) @map("created_at")
+  inventoryAllocations ReservationInventoryAllocation[]
 
   @@unique([reservationId, productId])
 }
-

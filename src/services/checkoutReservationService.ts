@@ -62,7 +62,7 @@ export class ReservationService {
 			}
 
 			// Decrease inventory
-			const decreased = await this.inventory.decreaseQuantity(productId, quantity);
+			const decreased = await this.inventory.decreaseQuantity(reservationId, productId, quantity);
 			if (!decreased) {
 				await this.reservations.delete(reservationId);
 				throw new ReservationError('Failed to reserve inventory');
@@ -82,8 +82,10 @@ export class ReservationService {
 		}
 
 		// Return stock to inventory
-		for (const [productId, quantity] of reservation.items) {
-			await this.inventory.increaseQuantity(productId, quantity);
+		for (const allocations of reservation.allocations.values()) {
+			for (const allocation of allocations) {
+				await this.inventory.increaseQuantity(allocation.inventoryId, allocation.quantity);
+			}
 		}
 
 		// Delete reservation

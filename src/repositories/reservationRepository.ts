@@ -8,6 +8,7 @@ export interface ReservationRecord {
 	updatedAt: Date;
 	expiresAt: Date;
 	items: Map<number, number>; // productId -> quantity
+	allocations: Map<number, { inventoryId: number; quantity: number }[]>;
 }
 
 export interface ReservationRepository {
@@ -25,7 +26,11 @@ function toRecord(reservation: {
 	createdAt: Date;
 	updatedAt: Date;
 	expiresAt: Date;
-	items: { productId: number; quantity: number }[];
+	items: {
+		productId: number;
+		quantity: number;
+		inventoryAllocations: { inventoryId: number; quantity: number }[];
+	}[];
 }): ReservationRecord {
 	return {
 		reservationId: reservation.reservationId,
@@ -34,6 +39,15 @@ function toRecord(reservation: {
 		updatedAt: reservation.updatedAt,
 		expiresAt: reservation.expiresAt,
 		items: new Map(reservation.items.map((item) => [item.productId, item.quantity])),
+		allocations: new Map(
+			reservation.items.map((item) => [
+				item.productId,
+				item.inventoryAllocations.map((allocation) => ({
+					inventoryId: allocation.inventoryId,
+					quantity: allocation.quantity,
+				})),
+			]),
+		),
 	};
 }
 
@@ -76,7 +90,7 @@ export function createDatabaseReservationRepository(prisma: PrismaClient): Reser
 		async findByUserId(userId: number): Promise<ReservationRecord | null> {
 			const reservation = await prisma.reservation.findFirst({
 				where: { userId, status: 'ACTIVE' },
-				include: { items: true },
+				include: { items: { include: { inventoryAllocations: true } } },
 			});
 
 			return reservation ? toRecord(reservation) : null;
@@ -85,7 +99,7 @@ export function createDatabaseReservationRepository(prisma: PrismaClient): Reser
 		async findByReservationId(reservationId: number): Promise<ReservationRecord | null> {
 			const reservation = await prisma.reservation.findUnique({
 				where: { reservationId },
-				include: { items: true },
+				include: { items: { include: { inventoryAllocations: true } } },
 			});
 
 			return reservation ? toRecord(reservation) : null;
@@ -110,7 +124,7 @@ export function createDatabaseReservationRepository(prisma: PrismaClient): Reser
 						lte: now,
 					},
 				},
-				include: { items: true },
+				include: { items: { include: { inventoryAllocations: true } } },
 			});
 
 			return reservations.map(toRecord);
