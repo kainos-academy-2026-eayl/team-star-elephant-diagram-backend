@@ -109,17 +109,14 @@ const DASHBOARD_SECTIONS = [
 	{ label: 'Orders', resource: 'orders', action: 'view' },
 	{ label: 'Inventory', resource: 'inventory', action: 'view' },
 	{ label: 'Finance', resource: 'finance', action: 'view' },
-	{ label: 'Admin accounts', resource: 'admins', action: 'manage' },
-	{ label: 'Permissions', resource: 'permissions', action: 'manage' },
 ] as const satisfies readonly (AdminPermission & { label: string })[];
 
 const DASHBOARD_QUICK_ACTIONS = [
 	{ label: 'Suspend or reactivate customers', resource: 'users', action: 'suspend' },
+	{ label: 'Permanently delete customers', resource: 'users', action: 'delete' },
 	{ label: 'Update order status', resource: 'orders', action: 'update' },
 	{ label: 'Add product', resource: 'inventory', action: 'create' },
 	{ label: 'Update finance records', resource: 'finance', action: 'update' },
-	{ label: 'Manage admin accounts', resource: 'admins', action: 'manage' },
-	{ label: 'Manage permissions', resource: 'permissions', action: 'manage' },
 ] as const satisfies readonly (AdminPermission & { label: string })[];
 
 const toBasketSummary = (basket: PricedBasketRecord): AdminBasketSummary => ({
@@ -354,8 +351,33 @@ export class AdminUserService {
 		return { user: { id: updated.userId, status: toAdminStatus(updated.status) } };
 	}
 
+	async deleteUser(userId: number): Promise<boolean> {
+		return this.users.delete(userId);
+	}
+
 	// Only loads and returns data the admin's role is permitted to view.
 	async getDashboard(admin: AuthenticatedAdmin): Promise<AdminDashboardResponse> {
+		if (admin.role === 'FinanceManager') {
+			const orders = await this.admins.getOrderMetrics();
+			return {
+				staff: { name: `${admin.forename} ${admin.surname}` },
+				inventoryPermissions: { view: false, create: false, update: false, delete: false },
+				inventorySummary: null,
+				role: admin.role,
+				dashboard: admin.dashboard,
+				sections: [],
+				quickActions: [],
+				cards: [
+					{ label: 'Revenue', value: formatPrice(orders.revenue) },
+					{ label: 'Orders', value: String(orders.totalOrders) },
+					{ label: 'Pending orders', value: String(orders.pendingOrders) },
+				],
+				recentOrders: [],
+				newUsers: [],
+				stockChanges: [],
+				lowStock: null,
+			};
+		}
 		const can = (resource: AdminResource, action: string) => hasPermission(admin.role, resource, action);
 		const [users, baskets, orders, inventory] = await Promise.all([
 			can('users', 'view') ? this.users.list({ skip: 0, take: DASHBOARD_NEW_USERS }) : null,

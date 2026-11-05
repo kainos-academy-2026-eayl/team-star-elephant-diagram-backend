@@ -50,6 +50,17 @@ The health check's `time` is the current UTC time in ISO 8601 format.
 
 ## Frontend integration
 
+FinanceManager is read-only and dashboard-only (`finance:view`). `GET /admin`
+returns revenue, total orders and pending orders without sections, quick actions
+or operational rows. Revenue is the all-time value of non-cancelled orders,
+not confirmed payments. Other admin resource permissions are denied for this role.
+
+For roles with `inventory:view`, `GET /admin` also returns `lowStock` with
+`total` and up to five `items`, ordered by quantity then inventory ID. Items
+include inventory ID, product, supplier, quantity and reorder level. A stock
+line is low when `quantity <= reorderLevel`, including zero stock. This data
+is loaded only for authorized roles; other roles receive `lowStock: null`.
+
 Run this API on port `3001` and the sibling frontend on port `3000`.
 Start PostgreSQL with `docker compose up -d`, apply the checked-in migrations
 with `npm run db:deploy`, then start the backend with `npm run dev`.
@@ -267,7 +278,7 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | Backend endpoint | Behavior |
 | --- | --- |
 | `POST /login` | Customer JSON credentials; returns `accessToken`, `expiresIn: 900`, and legacy `token` alias. |
-| `POST /admin/login` | Admin JSON credentials; returns `accessToken`, `expiresIn: 900`, and public admin details. |
+| `POST /admin/login` | Admin JSON credentials (`email`, `password`); returns `accessToken`, `expiresIn: 900`, and public admin details. Unknown email or incorrect password returns 401 with `Invalid email or password`. |
 | `POST /auth/refresh` | Exchanges the refresh cookie for a new access token and rotates the cookie. |
 | `POST /auth/logout` | Revokes the refresh session and expires the refresh cookie. |
 | `POST /forgot-password` | Accepts JSON `email`; requests a local reset link without revealing account existence. |
@@ -279,9 +290,18 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | `GET /admin/users/:id` | Admin only. Customer summary, 5 most recent orders, and the customer's current basket summary. |
 | `POST /admin/users/:id/suspend` | Admin only. Sets the customer to `suspended`; suspended customers get the normal invalid-credentials response at `POST /login`. |
 | `POST /admin/users/:id/reactivate` | Admin only. Sets the customer back to `active`. |
+| `POST /admin/users/:id/delete` | Requires `users:delete` (Admin or SuperAdmin). Permanently removes the customer, order items, orders, payment details, basket/items and customer refresh sessions in one transaction. Returns `{ deleted: true }`, or 404 if absent. Irreversible; no schema migration needed. |
 | `GET /admin/baskets?search=&page=` | Admin only. Lists customer baskets (20 per page), most recent activity first; `search` (or `q`) matches basket ID, customer name or email, case-insensitive. |
 | `GET /admin/baskets/:id` | Admin only. Basket details with customer, priced items and total; 404 for unknown IDs. |
 | `POST /admin/products` | Requires `inventory:create` (SuperAdmin, InventoryManager). JSON `imageURL` (http/https URL, ≤255), `name` (≤100), `description` (≤255), `category` (≤100), `price` (> 0, ≤ 99,999,999.99, max 2 decimals; number or numeric string). Returns 201 with the product and a `Location` header; 400 with field `details` on validation failure, 401 unauthenticated, 403 for other roles. |
+
+Unimplemented admin-account and permission-management dashboard controls are
+omitted. Customer deletion leaves products and staff accounts/sessions unchanged.
+For the optional PostgreSQL deletion/rollback integration test, set
+`USER_DELETION_TEST_DATABASE_URL` to a migrated, dedicated local
+`user_deletion_test_*` database and run
+`node --import tsx --test test/userDeletionDatabase.test.mjs`. Never use a
+development or production database for this test.
 
 `POST /admin/logout` remains a compatibility alias. The refresh endpoint is
 `/auth/refresh`, not `/admin/refresh`. Customer order history is not implemented;

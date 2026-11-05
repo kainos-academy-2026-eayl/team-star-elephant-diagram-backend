@@ -79,10 +79,10 @@ export function userController(
                 return;
             }
             res.set('Cache-Control', 'no-store').json({
-                user: { 
-                    firstName: user.forename, 
+                user: {
+                    firstName: user.forename,
                     lastName: user.surname,
-                    email: user.email, 
+                    email: user.email,
                     memberSince: user.createdAt.toISOString().slice(0, 10),
                     userId: user.userId,
                     addressLine1: user.addressLine1,
@@ -99,7 +99,7 @@ export function userController(
         }
     });
 
-    router.put('/profile/shipping-address', async (req, res) => {
+    router.put('/profile/shipping-address', createAuthRateLimiter(rateLimitOptions), async (req, res) => {
         const header = req.get('authorization') ?? '';
         const payload = header.startsWith('Bearer ') ? await tokens.verifyCustomerAccessToken(header.slice(7)) : null;
         if (!payload || typeof payload.userId !== 'number') {
