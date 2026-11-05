@@ -28,7 +28,7 @@ export function createCheckoutRouter(
 		return (payload as { userId: number }).userId;
 	}
 
-	router.post('/create-reservation', async (req: Request, res: Response) => {
+	router.post('/reservation', async (req: Request, res: Response) => {
 		const userId = await requireCustomerAuth(req, res);
 		if (userId === null) return;
 
