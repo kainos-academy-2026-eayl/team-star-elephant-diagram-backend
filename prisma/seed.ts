@@ -4,6 +4,7 @@ import argon2 from 'argon2';
 import { ARGON2_OPTIONS } from '../src/services/userService';
 import { products } from './products';
 import { adminUsers } from './adminUsers';
+import { seedOrders } from './orders';
 
 const prisma = new PrismaClient();
 
@@ -267,6 +268,9 @@ async function main() {
     }
 
     console.log(`${createdProducts} new products seeded`);
+
+    const createdOrders = await seedOrders(prisma);
+    console.log(`${createdOrders} new sample orders seeded (with order items)`);
 
     const seedPassword = process.env.ADMIN_SEED_PASSWORD;
     const adminCount = await prisma.adminUser.count();
