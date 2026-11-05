@@ -124,7 +124,7 @@ export async function cancelReservation(reservationId: number) {
 
 /**
  * Payment complete: marks the user's reservation CONVERTED, records an order with status PROCESSING linked to it,
- * and permanently removes the reserved stock from inventory. Runs atomically.
+ * permanently removes the reserved stock from inventory, and clears the user's basket. Runs atomically.
  */
 export async function convertReservationToOrder(userId: number) {
   const result = await prisma.$transaction(async (tx) => {
@@ -183,6 +183,9 @@ export async function convertReservationToOrder(userId: number) {
     });
 
     await tx.reservation.update({ where: { reservationId: reservation.reservationId }, data: { orderId: order.orderId } });
+
+    await tx.basketItem.deleteMany({ where: { basket: { userId } } });
+    await tx.basket.updateMany({ where: { userId }, data: { updatedAt: new Date() } });
 
     return { expired: false as const, order, reservationId: reservation.reservationId };
   });
