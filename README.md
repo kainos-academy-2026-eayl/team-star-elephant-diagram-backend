@@ -148,6 +148,11 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
    unchanged. Express will only use forwarding headers from configured proxy
    addresses. Leave this unset when the backend is accessed directly, and
    never trust all proxy addresses.
+4. Login, registration, admin and password-reset endpoints are rate-limited per
+   IP address. End-to-end test runs (see the test harness repository) log in far
+   more often than real users, so for local test runs only you can set
+   `RATE_LIMIT_MAX=1000` to replace every per-IP limit. It is ignored when
+   `NODE_ENV=production`.
 
 ### API
 

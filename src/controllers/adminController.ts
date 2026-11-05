@@ -1,7 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
-import { createAuthRateLimiter } from '../middleware/authRateLimiter';
+import { createAuthRateLimiter, rateLimitMax } from '../middleware/authRateLimiter';
 import { DASHBOARD_BY_ROLE, type AdminAction, type AdminResource } from '../models/adminRoles';
 import { requireAdmin, requirePermission } from '../middleware/requireAdmin';
 import {
@@ -17,7 +17,7 @@ import { sendTokens } from './authController';
 
 const adminRateLimit = rateLimit({
 	windowMs: 15 * 60 * 1000,
-	limit: 100,
+	limit: () => rateLimitMax(100),
 	standardHeaders: true,
 	legacyHeaders: false,
 });
