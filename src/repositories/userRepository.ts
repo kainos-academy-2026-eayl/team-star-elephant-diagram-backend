@@ -29,6 +29,13 @@ export class DuplicateEmailError extends Error {
   }
 }
 
+export interface ShippingAddress {
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  postcode: string;
+}
+
 export interface UserRepository {
   create(user: NewUser): Promise<CreatedUser>;
   findByEmail(email: string): Promise<User | null>;
@@ -37,6 +44,7 @@ export interface UserRepository {
   findRecentOrders(userId: number, take: number): Promise<UserOrderRecord[]>;
   updateStatus(userId: number, status: UserStatus): Promise<Pick<User, 'userId' | 'status'> | null>;
   delete(userId: number): Promise<boolean>;
+  updateShippingAddress(userId: number, address: ShippingAddress): Promise<Pick<User, 'userId' | 'addressLine1' | 'addressLine2' | 'city' | 'postcode'> | null>;
 }
 
 const userSummarySelect = { userId: true, forename: true, surname: true, email: true, createdAt: true, status: true } as const;
@@ -121,6 +129,25 @@ export const prismaUserRepository: UserRepository = {
   async updateStatus(userId, status) {
     try {
       return await prisma.user.update({ where: { userId }, data: { status }, select: { userId: true, status: true } });
+    } catch (error) {
+      // P2025 = record to update not found
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        return null;
+      }
+      throw error;
+    }
+  },
+  async updateShippingAddress(userId, { addressLine1, addressLine2, city, postcode }) {
+    try {
+      const updateData: Record<string, string> = { addressLine1, city, postcode };
+      if (addressLine2 !== undefined) {
+        updateData.addressLine2 = addressLine2;
+      }
+      return await prisma.user.update({
+        where: { userId },
+        data: updateData,
+        select: { userId: true, addressLine1: true, addressLine2: true, city: true, postcode: true },
+      });
     } catch (error) {
       // P2025 = record to update not found
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
