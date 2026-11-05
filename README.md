@@ -73,7 +73,7 @@ npm run db:seed
 ```
 
 The seed inserts 51 fictional hardware products across Laptops, Monitors,
-Keyboards, Mice and Headsets, plus 30 team merchandise products across T-Shirts,
+Keyboards, Mice and Headsets, plus 48 team merchandise products across T-Shirts,
 Hats, Scarves, Keyrings, Socks, Sliders, Drinkware, Accessories, Bags, Home, Toys,
 Pets and Jumpers. [prisma/products.ts](prisma/products.ts)
 exports the typed product array.
