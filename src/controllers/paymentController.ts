@@ -45,6 +45,7 @@ export function createPaymentRouter(
 					orderId: order.orderId,
 					items: order.items,
 					cost: order.cost,
+					shippingFee: order.shippingFee,
 					orderStatus: order.orderStatus,
 					orderPlacedAt: order.orderPlacedAt,
 				},
