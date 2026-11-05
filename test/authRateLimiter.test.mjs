@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { after, before, test } from 'node:test'
 import { createApp } from '../src/app.ts'
-import { AUTH_RATE_LIMIT_OPTIONS } from '../src/middleware/authRateLimiter.ts'
+import { AUTH_RATE_LIMIT_OPTIONS, rateLimitMax } from '../src/middleware/authRateLimiter.ts'
 import { memoryRefreshSessions } from './helpers/refreshSessions.mjs'
 import './helpers/authEnvironment.mjs'
 
@@ -53,6 +53,57 @@ test('auth rate limiter uses 10 requests per 15 minutes with standard headers on
   assert.equal(AUTH_RATE_LIMIT_OPTIONS.windowMs, 15 * 60 * 1000)
   assert.equal(AUTH_RATE_LIMIT_OPTIONS.standardHeaders, true)
   assert.equal(AUTH_RATE_LIMIT_OPTIONS.legacyHeaders, false)
+})
+
+test('RATE_LIMIT_MAX replaces rate limits outside production only', (t) => {
+  const saved = { max: process.env.RATE_LIMIT_MAX, env: process.env.NODE_ENV }
+  t.after(() => {
+    for (const [key, value] of [['RATE_LIMIT_MAX', saved.max], ['NODE_ENV', saved.env]]) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  })
+
+  delete process.env.RATE_LIMIT_MAX
+  assert.equal(rateLimitMax(10), 10)
+
+  process.env.NODE_ENV = 'development'
+  process.env.RATE_LIMIT_MAX = '1000'
+  assert.equal(rateLimitMax(10), 1000)
+
+  for (const invalid of ['0', '-5', '2.5', 'lots']) {
+    process.env.RATE_LIMIT_MAX = invalid
+    assert.equal(rateLimitMax(10), 10, `ignores RATE_LIMIT_MAX=${invalid}`)
+  }
+
+  process.env.RATE_LIMIT_MAX = '1000'
+  process.env.NODE_ENV = 'production'
+  assert.equal(rateLimitMax(10), 10)
+})
+
+test('RATE_LIMIT_MAX raises the auth limit of a new app', async (t) => {
+  const saved = process.env.RATE_LIMIT_MAX
+  process.env.RATE_LIMIT_MAX = '25'
+  t.after(() => {
+    if (saved === undefined) delete process.env.RATE_LIMIT_MAX
+    else process.env.RATE_LIMIT_MAX = saved
+  })
+  const raisedServer = createApp({
+    userRepository: emptyUserRepository,
+    adminRepository: emptyAdminRepository,
+    refreshSessionRepository: memoryRefreshSessions(),
+  }).listen(0, '127.0.0.1')
+  await once(raisedServer, 'listening')
+  try {
+    const response = await fetch(`http://127.0.0.1:${raisedServer.address().port}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    assert.equal(response.headers.get('ratelimit-limit'), '25')
+  } finally {
+    await new Promise((resolve) => raisedServer.close(resolve))
+  }
 })
 
 test('admin login uses the configured auth rate-limit options', async () => {

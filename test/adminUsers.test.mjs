@@ -59,12 +59,59 @@ const userRepository = {
 	},
 };
 const admins = new Map();
+const adminOrders = new Map();
+const makeAdminOrder = (orderId, userId, orderStatus, orderPlacedAt = new Date('2026-04-01T10:00:00Z')) => {
+	const user = users.get(userId);
+	return {
+		orderId,
+		orderPlacedAt,
+		orderStatus,
+		cost: '12.50',
+		modifiedAt: new Date('2026-04-02T10:00:00Z'),
+		user: {
+			userId,
+			forename: user.forename,
+			surname: user.surname,
+			email: user.email,
+			addressLine1: '1 Analytical Engine Way',
+			addressLine2: '',
+			city: 'London',
+			postcode: 'N1 1AA',
+		},
+		orderItems: [{ productId: 1, quantity: 2, product: { name: 'Green tea', price: '3.50' } }],
+	};
+};
 const adminRepository = {
 	async findByEmail() {
 		return null;
 	},
 	async findById(adminId) {
 		return admins.get(adminId) ?? null;
+	},
+	async listOrders({ search, status, skip, take }) {
+		const terms = (search ?? '').trim().split(/\s+/).filter(Boolean);
+		const matching = [...adminOrders.values()]
+			.filter((order) => (!status || order.orderStatus === status) && terms.every((term) => {
+				const id = term.replace(/^#/, '');
+				return (
+					(/^\d+$/.test(id) && Number(id) === order.orderId) ||
+					[order.user.forename, order.user.surname, order.user.email].some((field) =>
+						field.toLowerCase().includes(term.toLowerCase()),
+					)
+				);
+			}))
+			.sort((a, b) => b.orderPlacedAt - a.orderPlacedAt || b.orderId - a.orderId);
+		return { orders: matching.slice(skip, skip + take), total: matching.length };
+	},
+	async findOrderById(orderId) {
+		return adminOrders.get(orderId) ?? null;
+	},
+	async updateOrderStatus(orderId, from, to) {
+		const order = adminOrders.get(orderId);
+		if (!order || order.orderStatus !== from) return false;
+		order.orderStatus = to;
+		order.modifiedAt = new Date('2026-04-03T10:00:00Z');
+		return true;
 	},
 };
 
@@ -139,6 +186,7 @@ let url;
 let adminToken;
 let passwordHash;
 let productRequestIp = 0;
+let adminRequestIp = 0;
 before(async () => {
 	passwordHash = await argon2.hash('correct-horse', ARGON2_OPTIONS);
 	adminToken = await tokens.signAccessToken({ adminId: 1, role: 'SuperAdmin' });
@@ -185,6 +233,10 @@ beforeEach(() => {
 	users.set(1, customer(1, 'Ada', 'Lovelace', 'ada@example.com'));
 	users.set(2, customer(2, 'Grace', 'Hopper', 'grace@example.com'));
 	users.set(3, customer(3, 'Alan', 'Turing', 'alan.t@example.org', { status: 'SUSPENDED' }));
+	adminOrders.clear();
+	adminOrders.set(10, makeAdminOrder(10, 1, 'PENDING'));
+	adminOrders.set(11, makeAdminOrder(11, 2, 'PROCESSING', new Date('2026-04-02T10:00:00Z')));
+	adminOrders.set(12, makeAdminOrder(12, 3, 'SHIPPED', new Date('2026-04-03T10:00:00Z')));
 	orders.push(
 		{ userId: 1, orderId: 10, orderPlacedAt: new Date('2026-03-01T10:00:00Z'), orderStatus: 'DELIVERED', cost: '349.99' },
 		{ userId: 1, orderId: 11, orderPlacedAt: new Date('2026-04-01T10:00:00Z'), orderStatus: 'PENDING', cost: '12.50' },
@@ -207,13 +259,26 @@ beforeEach(() => {
 	});
 });
 
-const request = (method, path, token = adminToken) =>
+const _request = (method, path, token = adminToken) =>
 	fetch(`${url}${path}`, {
 		method,
 		headers: token ? { authorization: `Bearer ${token}` } : {},
 	});
-const get = (path, token) => request('GET', path, token);
-const post = (path, token) => request('POST', path, token);
+const requestWithUniqueIp = (method, path, token = adminToken, body) => {
+	const requestIp = ++adminRequestIp;
+	return fetch(`${url}${path}`, {
+		method,
+		headers: {
+			...(token ? { authorization: ['Bearer', token].join(' ') } : {}),
+			...(body === undefined ? {} : { 'content-type': 'application/json' }),
+			'x-forwarded-for': `198.51.${Math.floor(requestIp / 256)}.${requestIp % 256}`,
+		},
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+	});
+};
+const get = (path, token) => requestWithUniqueIp('GET', path, token);
+const post = (path, token) => requestWithUniqueIp('POST', path, token);
+const postJson = (path, body, token = adminToken) => requestWithUniqueIp('POST', path, token, body);
 const postProduct = (input, token = adminToken) =>
 	fetch(`${url}/admin/products`, {
 		method: 'POST',
@@ -315,7 +380,7 @@ test('admin user endpoints return 404 for unknown or malformed ids', async () =>
 			['POST', `/admin/users/${id}/suspend`],
 			['POST', `/admin/users/${id}/reactivate`],
 		]) {
-			const response = await request(method, path);
+			const response = await requestWithUniqueIp(method, path);
 			assert.equal(response.status, 404, `${method} ${path}`);
 			assert.deepEqual(await response.json(), { error: 'User not found' });
 		}
@@ -408,11 +473,11 @@ test('admin user endpoints require a live admin with a recognised role', async (
 	try {
 		admins.delete(1);
 		for (const [method, path] of paths)
-			assert.equal((await request(method, path)).status, 401, `${method} ${path} for deleted admin`);
+			assert.equal((await requestWithUniqueIp(method, path)).status, 401, `${method} ${path} for deleted admin`);
 
 		admins.set(1, { ...admin, role: 'Intern' });
 		for (const [method, path] of paths)
-			assert.equal((await request(method, path)).status, 401, `${method} ${path} for invalid role`);
+			assert.equal((await requestWithUniqueIp(method, path)).status, 401, `${method} ${path} for invalid role`);
 	} finally {
 		admins.set(1, admin);
 	}
@@ -548,6 +613,163 @@ test('GET /admin/baskets/:id returns 404 for unknown or malformed ids', async ()
 		const response = await get(`/admin/baskets/${id}`);
 		assert.equal(response.status, 404, id);
 		assert.deepEqual(await response.json(), { error: 'Basket not found' });
+	}
+});
+
+test('GET /admin/orders lists orders newest first with pagination', async () => {
+	for (let orderId = 100; orderId <= 120; orderId += 1) {
+		adminOrders.set(
+			orderId,
+			makeAdminOrder(orderId, 1, 'PENDING', new Date(Date.UTC(2026, 5, orderId - 99))),
+		);
+	}
+
+	const firstResponse = await get('/admin/orders');
+	assert.equal(firstResponse.status, 200);
+	assert.equal(firstResponse.headers.get('cache-control'), 'no-store');
+	const first = await firstResponse.json();
+	assert.deepEqual(first.pagination, { page: 1, pageSize: 20, totalPages: 2, totalOrders: 24 });
+	assert.deepEqual(first.orders.map((order) => order.orderId), Array.from({ length: 20 }, (_, index) => 120 - index));
+	assert.deepEqual(first.orders[0], {
+		orderId: 120,
+		customer: { id: 1, name: 'Ada Lovelace', email: 'ada@example.com' },
+		status: 'PENDING',
+		orderDate: '2026-06-21T00:00:00.000Z',
+		totalCost: 12.5,
+	});
+
+	const second = await (await get('/admin/orders?page=2')).json();
+	assert.deepEqual(second.pagination, { page: 2, pageSize: 20, totalPages: 2, totalOrders: 24 });
+	assert.deepEqual(second.orders.map((order) => order.orderId), [100, 12, 11, 10]);
+});
+
+test('GET /admin/orders searches by order ID and customer details and filters by status', async () => {
+	const search = async (query) => {
+		const response = await get(`/admin/orders?${query}`);
+		assert.equal(response.status, 200, query);
+		return (await response.json()).orders.map((order) => order.orderId);
+	};
+	assert.deepEqual(await search('search=%2310'), [10]);
+	assert.deepEqual(await search('q=hopper'), [11]);
+	assert.deepEqual(await search('search=ALAN%20Turing'), [12]);
+	assert.deepEqual(await search('search=example.org'), [12]);
+	assert.deepEqual(await search('status=processing'), [11]);
+	assert.deepEqual(await search('status='), [12, 11, 10]);
+	assert.deepEqual(await search('search=nobody'), []);
+});
+
+test('GET /admin/orders rejects invalid query parameters', async () => {
+	for (const query of [
+		'page=0',
+		'page=abc',
+		'page=1.5',
+		'status=unknown',
+		`search=${'a'.repeat(101)}`,
+		'search=a&search=b',
+	]) {
+		assert.equal((await get(`/admin/orders?${query}`)).status, 400, query);
+	}
+});
+
+test('GET /admin/orders/:id returns order, customer, items and allowed transitions', async () => {
+	const response = await get('/admin/orders/10');
+	assert.equal(response.status, 200);
+	assert.equal(response.headers.get('cache-control'), 'no-store');
+	assert.deepEqual(await response.json(), {
+		order: {
+			orderId: 10,
+			status: 'PENDING',
+			orderDate: '2026-04-01T10:00:00.000Z',
+			lastUpdated: '2026-04-02T10:00:00.000Z',
+			customer: {
+				id: 1,
+				name: 'Ada Lovelace',
+				email: 'ada@example.com',
+				address: { line1: '1 Analytical Engine Way', line2: '', city: 'London', postcode: 'N1 1AA' },
+			},
+			items: [{ productId: 1, productName: 'Green tea', quantity: 2, unitPrice: 3.5, itemTotal: 7 }],
+			itemCount: 2,
+			orderTotal: 12.5,
+			allowedTransitions: ['PROCESSING', 'CANCELLED'],
+		},
+	});
+});
+
+test('GET /admin/orders/:id returns 404 for unknown or malformed IDs', async () => {
+	for (const id of ['999', '0', '-1', 'abc', '1.5', '0x1', '1e1', '99999999999']) {
+		const response = await get(`/admin/orders/${id}`);
+		assert.equal(response.status, 404, id);
+		assert.deepEqual(await response.json(), { error: 'Order not found' });
+	}
+});
+
+test('POST /admin/orders/:id/status validates status input and missing orders', async () => {
+	for (const id of ['999', '0', 'abc', '1.5', '99999999999']) {
+		const response = await postJson(`/admin/orders/${id}/status`, { status: 'PROCESSING' });
+		assert.equal(response.status, 404, id);
+		assert.deepEqual(await response.json(), { error: 'Order not found' });
+	}
+	for (const body of [{}, { status: 'unknown' }, { status: 1 }, { status: ' ' }]) {
+		assert.equal((await postJson('/admin/orders/10/status', body)).status, 400, JSON.stringify(body));
+	}
+	assert.equal((await postJson('/admin/orders/10/status', null)).status, 400);
+});
+
+test('POST /admin/orders/:id/status applies every allowed fulfilment transition', async () => {
+	const transitions = [
+		['PENDING', 'PROCESSING'],
+		['PENDING', 'CANCELLED'],
+		['PROCESSING', 'SHIPPED'],
+		['PROCESSING', 'CANCELLED'],
+		['SHIPPED', 'DELIVERED'],
+	];
+	for (const [from, to] of transitions) {
+		adminOrders.set(10, makeAdminOrder(10, 1, from));
+		const response = await postJson('/admin/orders/10/status', { status: to.toLowerCase() });
+		assert.equal(response.status, 200, `${from} -> ${to}`);
+		assert.equal(response.headers.get('cache-control'), 'no-store');
+		const body = await response.json();
+		assert.equal(body.order.status, to);
+		assert.equal(adminOrders.get(10).orderStatus, to);
+	}
+});
+
+test('POST /admin/orders/:id/status rejects skipped, post-shipping cancellation, and terminal transitions', async () => {
+	const invalidTransitions = [
+		['PENDING', 'SHIPPED'],
+		['PROCESSING', 'DELIVERED'],
+		['SHIPPED', 'CANCELLED'],
+		['DELIVERED', 'PROCESSING'],
+		['CANCELLED', 'PROCESSING'],
+	];
+	for (const [from, to] of invalidTransitions) {
+		adminOrders.set(10, makeAdminOrder(10, 1, from));
+		const response = await postJson('/admin/orders/10/status', { status: to });
+		assert.equal(response.status, 400, `${from} -> ${to}`);
+		assert.deepEqual(await response.json(), {
+			error: 'Invalid status transition',
+			details: { from, to },
+		});
+		assert.equal(adminOrders.get(10).orderStatus, from);
+	}
+});
+
+test('POST /admin/orders/:id/status rejects a transition after a concurrent status change', async () => {
+	const originalUpdate = adminRepository.updateOrderStatus;
+	adminRepository.updateOrderStatus = async (orderId) => {
+		adminOrders.get(orderId).orderStatus = 'SHIPPED';
+		return false;
+	};
+	try {
+		const response = await postJson('/admin/orders/10/status', { status: 'PROCESSING' });
+		assert.equal(response.status, 400);
+		assert.deepEqual(await response.json(), {
+			error: 'Invalid status transition',
+			details: { from: 'SHIPPED', to: 'PROCESSING' },
+		});
+		assert.equal(adminOrders.get(10).orderStatus, 'SHIPPED');
+	} finally {
+		adminRepository.updateOrderStatus = originalUpdate;
 	}
 });
 

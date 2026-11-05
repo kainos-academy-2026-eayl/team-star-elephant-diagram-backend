@@ -28,6 +28,7 @@ enum ReservationStatus {
   CONVERTED
 }
 
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
@@ -125,6 +126,7 @@ model ReservationInventoryAllocation {
   @@index([inventoryId])
 }
 
+
 model Order {
   orderId       Int         @id @unique @default(autoincrement()) @map("order_id")
   orderPlacedAt DateTime    @default(now()) @map("order_placed_at")
@@ -219,6 +221,7 @@ model Reservation {
   userId         Int
   user           User              @relation(fields: [userId], references: [userId], onDelete: Cascade)
   items          ReservationItem[]
+ 
   status         ReservationStatus @default(ACTIVE)
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
@@ -228,6 +231,7 @@ model Reservation {
   order          Order?            @relation(fields: [orderId], references: [orderId], onDelete: SetNull)
 
   @@index([expiresAt])
+  
   @@index([status, expiresAt])
   @@index([userId, status])
 }

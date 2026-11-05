@@ -9,7 +9,13 @@ export const AUTH_RATE_LIMIT_OPTIONS = {
     message: { error: 'Too many requests, please try again later' },
 } as const satisfies Partial<Options>;
 
+// End-to-end test runs log in far more often than real users, so RATE_LIMIT_MAX can replace every per-IP limit outside production.
+export function rateLimitMax(defaultLimit: number): number {
+    const override = Number(process.env.RATE_LIMIT_MAX);
+    return process.env.NODE_ENV !== 'production' && Number.isInteger(override) && override > 0 ? override : defaultLimit;
+}
+
 // Each call returns a limiter with its own in-memory store, so every auth endpoint is counted independently.
 export function createAuthRateLimiter(overrides: Partial<Options> = {}): RequestHandler {
-    return rateLimit({ ...AUTH_RATE_LIMIT_OPTIONS, ...overrides });
+    return rateLimit({ ...AUTH_RATE_LIMIT_OPTIONS, limit: rateLimitMax(AUTH_RATE_LIMIT_OPTIONS.limit), ...overrides });
 }
