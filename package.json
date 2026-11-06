@@ -5,7 +5,9 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
+    "predev": "npm run db:generate",
     "dev": "tsx watch src/index.ts",
+    "prebuild": "npm run db:generate",
     "build": "npm run typecheck && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=dist/index.js --sourcemap",
     "lint": "biome lint .",
     "test": "node --import tsx --test test/*.test.mjs",

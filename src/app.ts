@@ -32,6 +32,8 @@ import { passwordResetController } from './controllers/passwordResetController';
 import { createReservationRouter } from './controllers/reservationRouter';
 import { reservationCleanupMiddleware } from './middleware/reservationCleanup';
 import prisma from './prismaClient';
+import { InventoryService } from './services/inventoryService';
+import { createInventoryRouter } from './routes/inventoryRoutes';
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
@@ -47,6 +49,7 @@ export interface AppDependencies {
 	passwordResetRepository?: PasswordResetRepository;
 	passwordResetDelivery?: PasswordResetDelivery;
 	startReservationExpirationJob?: boolean;
+	adminInventoryService?: InventoryService;
 }
 
 export interface AppWithServices extends Express {
@@ -67,6 +70,7 @@ export function createApp({
 	passwordResetRepository = prismaPasswordResetRepository,
 	passwordResetDelivery = createConsoleResetDelivery(),
 	startReservationExpirationJob = true,
+	adminInventoryService = new InventoryService(prisma),
 }: AppDependencies = {}): AppWithServices {
 	const app = express() as AppWithServices;
 	app.set('trust proxy', trustedProxyAddresses);
@@ -110,6 +114,7 @@ export function createApp({
 	app.use('/checkout', createCheckoutRouter(reservationService, tokenService));
 	app.use('/payment', createPaymentRouter(orderService, tokenService));
 	app.use(adminController(adminService, tokenService, sessions, productService, authRateLimitOptions));
+	app.use('/api/admin/inventory', createInventoryRouter(adminInventoryService, adminService, tokenService));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
 

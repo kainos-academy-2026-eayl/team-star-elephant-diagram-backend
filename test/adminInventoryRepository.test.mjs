@@ -3,7 +3,7 @@ import test from 'node:test';
 import prisma from '../src/prismaClient.ts';
 import { prismaAdminUserRepository } from '../src/repositories/adminRepository.ts';
 
-test('dashboard low-stock query uses each stock line reorder level, includes zero stock and limits results', async (t) => {
+test('dashboard low-stock query uses supplier-line thresholds and returns separate product status totals', async (t) => {
 	const queries = [];
 	const transaction = prisma.$transaction;
 	const original = {
@@ -11,13 +11,17 @@ test('dashboard low-stock query uses each stock line reorder level, includes zer
 		count: prisma.inventory.count,
 		findMany: prisma.inventory.findMany,
 	};
+	const productCount = prisma.product.count;
 	t.after(() => {
 		prisma.$transaction = transaction;
 		Object.assign(prisma.inventory, original);
+		prisma.product.count = productCount;
 	});
+
 	prisma.$transaction = (operations) => Promise.all(operations);
 	prisma.inventory.aggregate = async () => ({ _sum: { quantity: 12 } });
 	prisma.inventory.count = async () => 6;
+	prisma.product.count = async (query) => query?.where?.stockStatus === 'LOW_STOCK' ? 3 : query?.where ? 2 : 12;
 	prisma.inventory.findMany = async (query) => {
 		queries.push(query);
 		if (!query.where) return [];
@@ -39,4 +43,7 @@ test('dashboard low-stock query uses each stock line reorder level, includes zer
 	assert.deepEqual(result.lowStockItems, [
 		{ inventoryId: 7, product: 'Tea', supplier: 'Tea supplier', quantity: 0, reorderLevel: 5 },
 	]);
+	assert.equal(result.totalProducts, 12);
+	assert.equal(result.lowStockProducts, 3);
+	assert.equal(result.outOfStockProducts, 2);
 });

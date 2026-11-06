@@ -95,7 +95,16 @@ const makeAdminOrder = (orderId, userId, orderStatus, orderPlacedAt = new Date('
 		orderItems: [{ productId: 1, quantity: 2, product: { name: 'Green tea', price: '3.50' } }],
 	};
 };
+// productId -> sellable units (inventory on hand minus reservations)
+const stock = new Map();
 const adminRepository = {
+	async getProductStock(productIds) {
+		const ids = productIds ?? [...products.keys()];
+		return ids
+			.filter((id) => products.has(id))
+			.map((id) => ({ productId: id, name: products.get(id).name, price: products.get(id).price, availableStock: stock.get(id) ?? 0 }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	},
 	async findByEmail() {
 		return null;
 	},
@@ -180,8 +189,38 @@ const basketRepository = {
 		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
 		return new Map(basket?.items ?? []);
 	},
-	async addQuantity() {
-		throw new Error('not used by admin tests');
+	async addQuantity(userId, productId, quantity, maxQuantity) {
+		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
+		const next = (basket.items.get(productId) ?? 0) + quantity;
+		if (next > maxQuantity) return false;
+		basket.items.set(productId, next);
+		return true;
+	},
+	async setQuantity(userId, productId, quantity) {
+		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
+		if (!basket?.items.has(productId)) return false;
+		basket.items.set(productId, quantity);
+		return true;
+	},
+	async removeItem(userId, productId) {
+		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
+		return basket?.items.delete(productId) ?? false;
+	},
+	async createForUser(userId) {
+		const existing = [...baskets.values()].find((b) => b.userId === userId);
+		if (existing) return { basketId: existing.basketId, created: false };
+		const basketId = Math.max(0, ...baskets.keys()) + 1;
+		baskets.set(basketId, { basketId, userId, createdAt: new Date(), updatedAt: new Date(), items: new Map() });
+		return { basketId, created: true };
+	},
+	async clear(basketId) {
+		const basket = baskets.get(basketId);
+		if (!basket) return false;
+		basket.items.clear();
+		return true;
+	},
+	async delete(basketId) {
+		return baskets.delete(basketId);
 	},
 	async list(search, skip, take) {
 		const matching = [...baskets.values()]
@@ -259,6 +298,9 @@ beforeEach(() => {
 		{ userId: 1, orderId: 11, orderPlacedAt: new Date('2026-04-01T10:00:00Z'), orderStatus: 'PENDING', cost: '12.50' },
 		{ userId: 2, orderId: 12, orderPlacedAt: new Date('2026-04-02T10:00:00Z'), orderStatus: 'SHIPPED', cost: '5.00' },
 	);
+	stock.clear();
+	stock.set(1, 10);
+	stock.set(2, 3);
 	baskets.clear();
 	baskets.set(123, {
 		basketId: 123,
@@ -652,15 +694,112 @@ test('GET /admin/baskets/:id returns basket, customer and priced items', async (
 			createdAt: '2026-10-20',
 			lastActivity: '2026-10-25',
 			status: 'Active',
-			customer: { name: 'Grace Hopper', email: 'grace@example.com' },
+			customer: { id: 2, name: 'Grace Hopper', email: 'grace@example.com' },
 			items: [
-				{ productName: 'Green tea', quantity: 2, unitPrice: '£3.50', totalPrice: '£7.00' },
-				{ productName: 'Coffee beans', quantity: 2, unitPrice: '£39.00', totalPrice: '£78.00' },
+				{
+					productId: 1, productName: 'Green tea', quantity: 2, unitPrice: '£3.50', totalPrice: '£7.00',
+					availableStock: 10, maxQuantity: 10, exceedsStock: false,
+				},
+				{
+					productId: 2, productName: 'Coffee beans', quantity: 2, unitPrice: '£39.00', totalPrice: '£78.00',
+					availableStock: 3, maxQuantity: 3, exceedsStock: false,
+				},
 			],
 			itemCount: 4,
 			total: '£85.00',
 		},
+		products: [],
 	});
+});
+
+const sendJson = (method, path, body, token = adminToken) => requestWithUniqueIp(method, path, token, body);
+
+test('POST /admin/baskets creates an empty basket for a customer by email', async () => {
+	const response = await sendJson('POST', '/admin/baskets', { email: ' ADA@example.com ' });
+	assert.equal(response.status, 201);
+	const { basketId } = await response.json();
+	assert.equal(response.headers.get('location'), `/admin/baskets/${basketId}`);
+	assert.equal(baskets.get(basketId).userId, 1);
+
+	const duplicate = await sendJson('POST', '/admin/baskets', { email: 'ada@example.com' });
+	assert.equal(duplicate.status, 409);
+	assert.deepEqual(await duplicate.json(), { error: 'This customer already has a basket', code: 'exists', basketId });
+
+	const unknown = await sendJson('POST', '/admin/baskets', { email: 'nobody@example.com' });
+	assert.equal(unknown.status, 404);
+	assert.equal((await sendJson('POST', '/admin/baskets', { email: 'not-an-email' })).status, 400);
+});
+
+test('POST /admin/baskets/:id/items adds products within available stock', async () => {
+	stock.set(2, 5);
+	const added = await sendJson('POST', '/admin/baskets/456/items', { productId: 2, quantity: 4 });
+	assert.equal(added.status, 200);
+	const body = await added.json();
+	assert.deepEqual(body.basket.items.map((item) => [item.productId, item.quantity]), [[1, 1], [2, 4]]);
+	assert.deepEqual(body.products, []);
+
+	const tooMany = await sendJson('POST', '/admin/baskets/456/items', { productId: 2, quantity: 2 });
+	assert.equal(tooMany.status, 409);
+	assert.deepEqual(await tooMany.json(), {
+		error: 'Only 1 more can be added (5 maximum, 4 already in basket)',
+		code: 'stock',
+	});
+	assert.equal(baskets.get(456).items.get(2), 4);
+
+	stock.set(2, 0);
+	baskets.get(456).items.delete(2);
+	const outOfStock = await sendJson('POST', '/admin/baskets/456/items', { productId: 2, quantity: 1 });
+	assert.equal(outOfStock.status, 409);
+	assert.equal((await outOfStock.json()).error, 'This product is out of stock');
+	assert.equal((await sendJson('POST', '/admin/baskets/456/items', { productId: 99, quantity: 1 })).status, 404);
+	assert.equal((await sendJson('POST', '/admin/baskets/999/items', { productId: 1, quantity: 1 })).status, 404);
+	assert.equal((await sendJson('POST', '/admin/baskets/456/items', { productId: 1, quantity: 0 })).status, 400);
+});
+
+test('GET /admin/baskets/:id lists in-stock products not already in the basket and flags oversold lines', async () => {
+	stock.set(1, 0);
+	const body = await (await get('/admin/baskets/456')).json();
+	assert.deepEqual(body.basket.items[0], {
+		productId: 1, productName: 'Green tea', quantity: 1, unitPrice: '£3.50', totalPrice: '£3.50',
+		availableStock: 0, maxQuantity: 0, exceedsStock: true,
+	});
+	assert.deepEqual(body.products, [
+		{ productId: 2, name: 'Coffee beans', unitPrice: '£39.00', availableStock: 3, maxQuantity: 3 },
+	]);
+});
+
+test('PATCH /admin/baskets/:id/items/:productId sets quantity within available stock', async () => {
+	const updated = await sendJson('PATCH', '/admin/baskets/123/items/2', { quantity: 3 });
+	assert.equal(updated.status, 200);
+	assert.equal(baskets.get(123).items.get(2), 3);
+
+	const tooMany = await sendJson('PATCH', '/admin/baskets/123/items/2', { quantity: 4 });
+	assert.equal(tooMany.status, 409);
+	assert.equal((await tooMany.json()).error, 'Quantity cannot exceed 3 (3 in stock)');
+	assert.equal(baskets.get(123).items.get(2), 3);
+
+	assert.equal((await sendJson('PATCH', '/admin/baskets/456/items/2', { quantity: 1 })).status, 404);
+	assert.equal((await sendJson('PATCH', '/admin/baskets/123/items/2', { quantity: 0 })).status, 400);
+	assert.equal((await sendJson('PATCH', '/admin/baskets/123/items/abc', { quantity: 1 })).status, 404);
+});
+
+test('DELETE basket items, clear and delete baskets', async () => {
+	const removed = await requestWithUniqueIp('DELETE', '/admin/baskets/123/items/1');
+	assert.equal(removed.status, 200);
+	assert.deepEqual([...baskets.get(123).items.keys()], [2]);
+	assert.equal((await requestWithUniqueIp('DELETE', '/admin/baskets/123/items/1')).status, 404);
+
+	const cleared = await requestWithUniqueIp('DELETE', '/admin/baskets/123/items');
+	assert.equal(cleared.status, 200);
+	assert.equal((await cleared.json()).basket.status, 'Empty');
+	assert.equal(baskets.get(123).items.size, 0);
+
+	const deleted = await requestWithUniqueIp('DELETE', '/admin/baskets/123');
+	assert.equal(deleted.status, 200);
+	assert.deepEqual(await deleted.json(), { deleted: true });
+	assert.equal(baskets.has(123), false);
+	assert.equal((await requestWithUniqueIp('DELETE', '/admin/baskets/123')).status, 404);
+	assert.equal((await requestWithUniqueIp('DELETE', '/admin/baskets/123/items')).status, 404);
 });
 
 test('GET /admin/baskets/:id returns 404 for unknown or malformed ids', async () => {

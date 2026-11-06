@@ -48,10 +48,21 @@ export interface AdminOrderMetrics {
 }
 
 export interface AdminInventoryMetrics {
+	totalProducts: number;
+	lowStockProducts: number;
+	outOfStockProducts: number;
 	unitsInStock: number;
 	lowStockLines: number;
 	lowStockItems: Array<{ inventoryId: number; product: string; supplier: string; quantity: number; reorderLevel: number }>;
 	recentStockChanges: Array<{ product: string; quantity: number; modifiedAt: Date }>;
+}
+
+export interface AdminProductStockRecord {
+	productId: number;
+	name: string;
+	price: number;
+	// Sellable units: inventory on hand minus units reserved by checkouts.
+	availableStock: number;
 }
 
 export interface adminRepository {
@@ -63,7 +74,11 @@ export interface adminRepository {
 	findOrderById(orderId: number): Promise<AdminOrderDetailsRecord | null>;
 	// Compare-and-set: only updates when the order is still in `from`, so concurrent updates cannot skip a transition.
 	updateOrderStatus(orderId: number, from: OrderStatus, to: OrderStatus): Promise<boolean>;
+	// Omit productIds to list every product (capped) for admin pickers.
+	getProductStock(productIds?: readonly number[]): Promise<AdminProductStockRecord[]>;
 }
+
+const PRODUCT_STOCK_LIMIT = 500;
 
 const MAX_ORDER_ID = 2_147_483_647;
 
@@ -94,6 +109,28 @@ const orderSummarySelect = {
 } as const satisfies Prisma.OrderSelect;
 
 export const prismaAdminUserRepository: adminRepository = {
+	async getProductStock(productIds) {
+		const rows = await prisma.product.findMany({
+			where: productIds ? { productId: { in: [...productIds] } } : {},
+			take: productIds ? productIds.length : PRODUCT_STOCK_LIMIT,
+			select: {
+				productId: true,
+				name: true,
+				price: true,
+				inventory: { select: { quantity: true, reservedQuantity: true } },
+			},
+			orderBy: [{ name: 'asc' }, { productId: 'asc' }],
+		});
+		return rows.map((row) => ({
+			productId: row.productId,
+			name: row.name,
+			price: Number(row.price.toString()),
+			availableStock: row.inventory.reduce(
+				(total, line) => total + Math.max(0, line.quantity - line.reservedQuantity),
+				0,
+			),
+		}));
+	},
 	async findByEmail(email: string) {
 		return prisma.adminUser.findUnique({
 			where: { email },
@@ -133,7 +170,7 @@ export const prismaAdminUserRepository: adminRepository = {
 		};
 	},
 	async getInventoryMetrics() {
-		const [stock, lowStockLines, recent, lowStock] = await prisma.$transaction([
+		const [stock, lowStockLines, recent, lowStock, totalProducts, lowStockProducts, outOfStockProducts] = await prisma.$transaction([
 			prisma.inventory.aggregate({ _sum: { quantity: true } }),
 			prisma.inventory.count({ where: { quantity: { lte: prisma.inventory.fields.reorderLevel } } }),
 			prisma.inventory.findMany({
@@ -153,8 +190,12 @@ export const prismaAdminUserRepository: adminRepository = {
 				orderBy: [{ quantity: 'asc' }, { inventoryId: 'asc' }],
 				take: DASHBOARD_RECENT_ROWS,
 			}),
+			prisma.product.count(),
+			prisma.product.count({ where: { stockStatus: 'LOW_STOCK' } }),
+			prisma.product.count({ where: { stockStatus: 'OUT_OF_STOCK' } }),
 		]);
 		return {
+			totalProducts, lowStockProducts, outOfStockProducts,
 			unitsInStock: stock._sum.quantity ?? 0,
 			lowStockLines,
 			lowStockItems: lowStock.map((row) => ({
