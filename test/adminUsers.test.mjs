@@ -17,6 +17,7 @@ const tokens = new TokenService(
 
 const users = new Map();
 const orders = [];
+const refreshSessions = memoryRefreshSessions();
 const matches = (user, search) =>
 	(search ?? '')
 		.trim()
@@ -57,14 +58,83 @@ const userRepository = {
 		user.status = status;
 		return { userId, status };
 	},
+	async delete(userId) {
+		if (!users.delete(userId)) return false;
+		for (let index = orders.length - 1; index >= 0; index--) {
+			if (orders[index].userId === userId) orders.splice(index, 1);
+		}
+		for (const [id, basket] of baskets) {
+			if (basket.userId === userId) baskets.delete(id);
+		}
+		for (const [id, session] of refreshSessions.rows) {
+			if (session.principalId === userId && session.principalKind === 'customer') refreshSessions.rows.delete(id);
+		}
+		return true;
+	},
 };
 const admins = new Map();
+const adminOrders = new Map();
+const makeAdminOrder = (orderId, userId, orderStatus, orderPlacedAt = new Date('2026-04-01T10:00:00Z')) => {
+	const user = users.get(userId);
+	return {
+		orderId,
+		orderPlacedAt,
+		orderStatus,
+		cost: '12.50',
+		modifiedAt: new Date('2026-04-02T10:00:00Z'),
+		user: {
+			userId,
+			forename: user.forename,
+			surname: user.surname,
+			email: user.email,
+			addressLine1: '1 Analytical Engine Way',
+			addressLine2: '',
+			city: 'London',
+			postcode: 'N1 1AA',
+		},
+		orderItems: [{ productId: 1, quantity: 2, product: { name: 'Green tea', price: '3.50' } }],
+	};
+};
+// productId -> sellable units (inventory on hand minus reservations)
+const stock = new Map();
 const adminRepository = {
+	async getProductStock(productIds) {
+		const ids = productIds ?? [...products.keys()];
+		return ids
+			.filter((id) => products.has(id))
+			.map((id) => ({ productId: id, name: products.get(id).name, price: products.get(id).price, availableStock: stock.get(id) ?? 0 }))
+			.sort((a, b) => a.name.localeCompare(b.name));
+	},
 	async findByEmail() {
 		return null;
 	},
 	async findById(adminId) {
 		return admins.get(adminId) ?? null;
+	},
+	async listOrders({ search, status, skip, take }) {
+		const terms = (search ?? '').trim().split(/\s+/).filter(Boolean);
+		const matching = [...adminOrders.values()]
+			.filter((order) => (!status || order.orderStatus === status) && terms.every((term) => {
+				const id = term.replace(/^#/, '');
+				return (
+					(/^\d+$/.test(id) && Number(id) === order.orderId) ||
+					[order.user.forename, order.user.surname, order.user.email].some((field) =>
+						field.toLowerCase().includes(term.toLowerCase()),
+					)
+				);
+			}))
+			.sort((a, b) => b.orderPlacedAt - a.orderPlacedAt || b.orderId - a.orderId);
+		return { orders: matching.slice(skip, skip + take), total: matching.length };
+	},
+	async findOrderById(orderId) {
+		return adminOrders.get(orderId) ?? null;
+	},
+	async updateOrderStatus(orderId, from, to) {
+		const order = adminOrders.get(orderId);
+		if (!order || order.orderStatus !== from) return false;
+		order.orderStatus = to;
+		order.modifiedAt = new Date('2026-04-03T10:00:00Z');
+		return true;
 	},
 };
 
@@ -119,8 +189,38 @@ const basketRepository = {
 		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
 		return new Map(basket?.items ?? []);
 	},
-	async addQuantity() {
-		throw new Error('not used by admin tests');
+	async addQuantity(userId, productId, quantity, maxQuantity) {
+		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
+		const next = (basket.items.get(productId) ?? 0) + quantity;
+		if (next > maxQuantity) return false;
+		basket.items.set(productId, next);
+		return true;
+	},
+	async setQuantity(userId, productId, quantity) {
+		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
+		if (!basket?.items.has(productId)) return false;
+		basket.items.set(productId, quantity);
+		return true;
+	},
+	async removeItem(userId, productId) {
+		const basket = [...baskets.values()].find((b) => b.userId === Number(userId));
+		return basket?.items.delete(productId) ?? false;
+	},
+	async createForUser(userId) {
+		const existing = [...baskets.values()].find((b) => b.userId === userId);
+		if (existing) return { basketId: existing.basketId, created: false };
+		const basketId = Math.max(0, ...baskets.keys()) + 1;
+		baskets.set(basketId, { basketId, userId, createdAt: new Date(), updatedAt: new Date(), items: new Map() });
+		return { basketId, created: true };
+	},
+	async clear(basketId) {
+		const basket = baskets.get(basketId);
+		if (!basket) return false;
+		basket.items.clear();
+		return true;
+	},
+	async delete(basketId) {
+		return baskets.delete(basketId);
 	},
 	async list(search, skip, take) {
 		const matching = [...baskets.values()]
@@ -139,6 +239,8 @@ let url;
 let adminToken;
 let passwordHash;
 let productRequestIp = 0;
+let adminRequestIp = 0;
+let testRequestIp = 0;
 before(async () => {
 	passwordHash = await argon2.hash('correct-horse', ARGON2_OPTIONS);
 	adminToken = await tokens.signAccessToken({ adminId: 1, role: 'SuperAdmin' });
@@ -148,7 +250,7 @@ before(async () => {
 		productRepository,
 		basketRepository,
 		tokenService: tokens,
-		refreshSessionRepository: memoryRefreshSessions(),
+		refreshSessionRepository: refreshSessions,
 		authRateLimitOptions: { limit: 1000 },
 		trustedProxyAddresses: ['127.0.0.1'],
 	}).listen(0, '127.0.0.1');
@@ -174,22 +276,31 @@ const customer = (userId, forename, surname, email, overrides = {}) => ({
 });
 
 beforeEach(() => {
+	testRequestIp++;
 	for (const productId of products.keys()) {
 		if (productId > 2) products.delete(productId);
 	}
 	productCreateCalls.length = 0;
 	users.clear();
+	refreshSessions.rows.clear();
 	admins.clear();
 	admins.set(1, { adminId: 1, forename: 'Test', surname: 'Admin', email: 'admin@example.com', role: 'SuperAdmin' });
 	orders.length = 0;
 	users.set(1, customer(1, 'Ada', 'Lovelace', 'ada@example.com'));
 	users.set(2, customer(2, 'Grace', 'Hopper', 'grace@example.com'));
 	users.set(3, customer(3, 'Alan', 'Turing', 'alan.t@example.org', { status: 'SUSPENDED' }));
+	adminOrders.clear();
+	adminOrders.set(10, makeAdminOrder(10, 1, 'PENDING'));
+	adminOrders.set(11, makeAdminOrder(11, 2, 'PROCESSING', new Date('2026-04-02T10:00:00Z')));
+	adminOrders.set(12, makeAdminOrder(12, 3, 'SHIPPED', new Date('2026-04-03T10:00:00Z')));
 	orders.push(
 		{ userId: 1, orderId: 10, orderPlacedAt: new Date('2026-03-01T10:00:00Z'), orderStatus: 'DELIVERED', cost: '349.99' },
 		{ userId: 1, orderId: 11, orderPlacedAt: new Date('2026-04-01T10:00:00Z'), orderStatus: 'PENDING', cost: '12.50' },
 		{ userId: 2, orderId: 12, orderPlacedAt: new Date('2026-04-02T10:00:00Z'), orderStatus: 'SHIPPED', cost: '5.00' },
 	);
+	stock.clear();
+	stock.set(1, 10);
+	stock.set(2, 3);
 	baskets.clear();
 	baskets.set(123, {
 		basketId: 123,
@@ -207,13 +318,29 @@ beforeEach(() => {
 	});
 });
 
-const request = (method, path, token = adminToken) =>
+const _request = (method, path, token = adminToken) =>
 	fetch(`${url}${path}`, {
 		method,
-		headers: token ? { authorization: `Bearer ${token}` } : {},
+		headers: {
+			'x-forwarded-for': `198.51.100.${testRequestIp}`,
+			...(token ? { authorization: `Bearer ${token}` } : {}),
+		},
 	});
-const get = (path, token) => request('GET', path, token);
-const post = (path, token) => request('POST', path, token);
+const requestWithUniqueIp = (method, path, token = adminToken, body) => {
+	const requestIp = ++adminRequestIp;
+	return fetch(`${url}${path}`, {
+		method,
+		headers: {
+			...(token ? { authorization: ['Bearer', token].join(' ') } : {}),
+			...(body === undefined ? {} : { 'content-type': 'application/json' }),
+			'x-forwarded-for': `198.51.${Math.floor(requestIp / 256)}.${requestIp % 256}`,
+		},
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+	});
+};
+const get = (path, token) => requestWithUniqueIp('GET', path, token);
+const post = (path, token) => requestWithUniqueIp('POST', path, token);
+const postJson = (path, body, token = adminToken) => requestWithUniqueIp('POST', path, token, body);
 const postProduct = (input, token = adminToken) =>
 	fetch(`${url}/admin/products`, {
 		method: 'POST',
@@ -314,11 +441,45 @@ test('admin user endpoints return 404 for unknown or malformed ids', async () =>
 			['GET', `/admin/users/${id}`],
 			['POST', `/admin/users/${id}/suspend`],
 			['POST', `/admin/users/${id}/reactivate`],
+			['POST', `/admin/users/${id}/delete`],
 		]) {
-			const response = await request(method, path);
+			const response = await requestWithUniqueIp(method, path);
 			assert.equal(response.status, 404, `${method} ${path}`);
 			assert.deepEqual(await response.json(), { error: 'User not found' });
 		}
+	}
+});
+
+test('permanent deletion removes the customer and rejects login, refresh and existing access', async () => {
+	const login = await customerLogin();
+	const credentials = await login.json();
+	const cookie = login.headers.getSetCookie()[0].split(';', 1)[0];
+	const response = await post('/admin/users/1/delete');
+	assert.equal(response.status, 200);
+	assert.deepEqual(await response.json(), { deleted: true });
+	assert.equal(users.has(1), false);
+	assert.equal(orders.some((order) => order.userId === 1), false);
+	assert.equal([...refreshSessions.rows.values()].some((session) => session.principalId === 1), false);
+	assert.equal(users.has(2), true);
+	assert.equal(orders.some((order) => order.userId === 2), true);
+	assert.equal((await get('/admin/users/1')).status, 404);
+	assert.equal((await post('/admin/users/1/delete')).status, 404);
+	assert.equal((await customerLogin()).status, 401);
+	assert.equal((await get('/profile', credentials.accessToken)).status, 401);
+	const refresh = await fetch(`${url}/auth/refresh`, { method: 'POST', headers: { cookie } });
+	assert.equal(refresh.status, 401);
+});
+
+test('permanent deletion returns an explicit error on repository failure', async () => {
+	const original = userRepository.delete;
+	userRepository.delete = async () => { throw new Error('db down'); };
+	try {
+		const response = await post('/admin/users/1/delete');
+		assert.equal(response.status, 500);
+		assert.match((await response.json()).error, /could not be deleted/);
+		assert.equal(users.has(1), true);
+	} finally {
+		userRepository.delete = original;
 	}
 });
 
@@ -384,6 +545,7 @@ test('admin user endpoints require an admin access token', async () => {
 			['GET', '/admin/users/1'],
 			['POST', '/admin/users/1/suspend'],
 			['POST', '/admin/users/3/reactivate'],
+			['POST', '/admin/users/1/delete'],
 		]) {
 			const response = await fetch(`${url}${path}`, {
 				method,
@@ -408,11 +570,11 @@ test('admin user endpoints require a live admin with a recognised role', async (
 	try {
 		admins.delete(1);
 		for (const [method, path] of paths)
-			assert.equal((await request(method, path)).status, 401, `${method} ${path} for deleted admin`);
+			assert.equal((await requestWithUniqueIp(method, path)).status, 401, `${method} ${path} for deleted admin`);
 
 		admins.set(1, { ...admin, role: 'Intern' });
 		for (const [method, path] of paths)
-			assert.equal((await request(method, path)).status, 401, `${method} ${path} for invalid role`);
+			assert.equal((await requestWithUniqueIp(method, path)).status, 401, `${method} ${path} for invalid role`);
 	} finally {
 		admins.set(1, admin);
 	}
@@ -532,15 +694,112 @@ test('GET /admin/baskets/:id returns basket, customer and priced items', async (
 			createdAt: '2026-10-20',
 			lastActivity: '2026-10-25',
 			status: 'Active',
-			customer: { name: 'Grace Hopper', email: 'grace@example.com' },
+			customer: { id: 2, name: 'Grace Hopper', email: 'grace@example.com' },
 			items: [
-				{ productName: 'Green tea', quantity: 2, unitPrice: '£3.50', totalPrice: '£7.00' },
-				{ productName: 'Coffee beans', quantity: 2, unitPrice: '£39.00', totalPrice: '£78.00' },
+				{
+					productId: 1, productName: 'Green tea', quantity: 2, unitPrice: '£3.50', totalPrice: '£7.00',
+					availableStock: 10, maxQuantity: 10, exceedsStock: false,
+				},
+				{
+					productId: 2, productName: 'Coffee beans', quantity: 2, unitPrice: '£39.00', totalPrice: '£78.00',
+					availableStock: 3, maxQuantity: 3, exceedsStock: false,
+				},
 			],
 			itemCount: 4,
 			total: '£85.00',
 		},
+		products: [],
 	});
+});
+
+const sendJson = (method, path, body, token = adminToken) => requestWithUniqueIp(method, path, token, body);
+
+test('POST /admin/baskets creates an empty basket for a customer by email', async () => {
+	const response = await sendJson('POST', '/admin/baskets', { email: ' ADA@example.com ' });
+	assert.equal(response.status, 201);
+	const { basketId } = await response.json();
+	assert.equal(response.headers.get('location'), `/admin/baskets/${basketId}`);
+	assert.equal(baskets.get(basketId).userId, 1);
+
+	const duplicate = await sendJson('POST', '/admin/baskets', { email: 'ada@example.com' });
+	assert.equal(duplicate.status, 409);
+	assert.deepEqual(await duplicate.json(), { error: 'This customer already has a basket', code: 'exists', basketId });
+
+	const unknown = await sendJson('POST', '/admin/baskets', { email: 'nobody@example.com' });
+	assert.equal(unknown.status, 404);
+	assert.equal((await sendJson('POST', '/admin/baskets', { email: 'not-an-email' })).status, 400);
+});
+
+test('POST /admin/baskets/:id/items adds products within available stock', async () => {
+	stock.set(2, 5);
+	const added = await sendJson('POST', '/admin/baskets/456/items', { productId: 2, quantity: 4 });
+	assert.equal(added.status, 200);
+	const body = await added.json();
+	assert.deepEqual(body.basket.items.map((item) => [item.productId, item.quantity]), [[1, 1], [2, 4]]);
+	assert.deepEqual(body.products, []);
+
+	const tooMany = await sendJson('POST', '/admin/baskets/456/items', { productId: 2, quantity: 2 });
+	assert.equal(tooMany.status, 409);
+	assert.deepEqual(await tooMany.json(), {
+		error: 'Only 1 more can be added (5 maximum, 4 already in basket)',
+		code: 'stock',
+	});
+	assert.equal(baskets.get(456).items.get(2), 4);
+
+	stock.set(2, 0);
+	baskets.get(456).items.delete(2);
+	const outOfStock = await sendJson('POST', '/admin/baskets/456/items', { productId: 2, quantity: 1 });
+	assert.equal(outOfStock.status, 409);
+	assert.equal((await outOfStock.json()).error, 'This product is out of stock');
+	assert.equal((await sendJson('POST', '/admin/baskets/456/items', { productId: 99, quantity: 1 })).status, 404);
+	assert.equal((await sendJson('POST', '/admin/baskets/999/items', { productId: 1, quantity: 1 })).status, 404);
+	assert.equal((await sendJson('POST', '/admin/baskets/456/items', { productId: 1, quantity: 0 })).status, 400);
+});
+
+test('GET /admin/baskets/:id lists in-stock products not already in the basket and flags oversold lines', async () => {
+	stock.set(1, 0);
+	const body = await (await get('/admin/baskets/456')).json();
+	assert.deepEqual(body.basket.items[0], {
+		productId: 1, productName: 'Green tea', quantity: 1, unitPrice: '£3.50', totalPrice: '£3.50',
+		availableStock: 0, maxQuantity: 0, exceedsStock: true,
+	});
+	assert.deepEqual(body.products, [
+		{ productId: 2, name: 'Coffee beans', unitPrice: '£39.00', availableStock: 3, maxQuantity: 3 },
+	]);
+});
+
+test('PATCH /admin/baskets/:id/items/:productId sets quantity within available stock', async () => {
+	const updated = await sendJson('PATCH', '/admin/baskets/123/items/2', { quantity: 3 });
+	assert.equal(updated.status, 200);
+	assert.equal(baskets.get(123).items.get(2), 3);
+
+	const tooMany = await sendJson('PATCH', '/admin/baskets/123/items/2', { quantity: 4 });
+	assert.equal(tooMany.status, 409);
+	assert.equal((await tooMany.json()).error, 'Quantity cannot exceed 3 (3 in stock)');
+	assert.equal(baskets.get(123).items.get(2), 3);
+
+	assert.equal((await sendJson('PATCH', '/admin/baskets/456/items/2', { quantity: 1 })).status, 404);
+	assert.equal((await sendJson('PATCH', '/admin/baskets/123/items/2', { quantity: 0 })).status, 400);
+	assert.equal((await sendJson('PATCH', '/admin/baskets/123/items/abc', { quantity: 1 })).status, 404);
+});
+
+test('DELETE basket items, clear and delete baskets', async () => {
+	const removed = await requestWithUniqueIp('DELETE', '/admin/baskets/123/items/1');
+	assert.equal(removed.status, 200);
+	assert.deepEqual([...baskets.get(123).items.keys()], [2]);
+	assert.equal((await requestWithUniqueIp('DELETE', '/admin/baskets/123/items/1')).status, 404);
+
+	const cleared = await requestWithUniqueIp('DELETE', '/admin/baskets/123/items');
+	assert.equal(cleared.status, 200);
+	assert.equal((await cleared.json()).basket.status, 'Empty');
+	assert.equal(baskets.get(123).items.size, 0);
+
+	const deleted = await requestWithUniqueIp('DELETE', '/admin/baskets/123');
+	assert.equal(deleted.status, 200);
+	assert.deepEqual(await deleted.json(), { deleted: true });
+	assert.equal(baskets.has(123), false);
+	assert.equal((await requestWithUniqueIp('DELETE', '/admin/baskets/123')).status, 404);
+	assert.equal((await requestWithUniqueIp('DELETE', '/admin/baskets/123/items')).status, 404);
 });
 
 test('GET /admin/baskets/:id returns 404 for unknown or malformed ids', async () => {
@@ -548,6 +807,163 @@ test('GET /admin/baskets/:id returns 404 for unknown or malformed ids', async ()
 		const response = await get(`/admin/baskets/${id}`);
 		assert.equal(response.status, 404, id);
 		assert.deepEqual(await response.json(), { error: 'Basket not found' });
+	}
+});
+
+test('GET /admin/orders lists orders newest first with pagination', async () => {
+	for (let orderId = 100; orderId <= 120; orderId += 1) {
+		adminOrders.set(
+			orderId,
+			makeAdminOrder(orderId, 1, 'PENDING', new Date(Date.UTC(2026, 5, orderId - 99))),
+		);
+	}
+
+	const firstResponse = await get('/admin/orders');
+	assert.equal(firstResponse.status, 200);
+	assert.equal(firstResponse.headers.get('cache-control'), 'no-store');
+	const first = await firstResponse.json();
+	assert.deepEqual(first.pagination, { page: 1, pageSize: 20, totalPages: 2, totalOrders: 24 });
+	assert.deepEqual(first.orders.map((order) => order.orderId), Array.from({ length: 20 }, (_, index) => 120 - index));
+	assert.deepEqual(first.orders[0], {
+		orderId: 120,
+		customer: { id: 1, name: 'Ada Lovelace', email: 'ada@example.com' },
+		status: 'PENDING',
+		orderDate: '2026-06-21T00:00:00.000Z',
+		totalCost: 12.5,
+	});
+
+	const second = await (await get('/admin/orders?page=2')).json();
+	assert.deepEqual(second.pagination, { page: 2, pageSize: 20, totalPages: 2, totalOrders: 24 });
+	assert.deepEqual(second.orders.map((order) => order.orderId), [100, 12, 11, 10]);
+});
+
+test('GET /admin/orders searches by order ID and customer details and filters by status', async () => {
+	const search = async (query) => {
+		const response = await get(`/admin/orders?${query}`);
+		assert.equal(response.status, 200, query);
+		return (await response.json()).orders.map((order) => order.orderId);
+	};
+	assert.deepEqual(await search('search=%2310'), [10]);
+	assert.deepEqual(await search('q=hopper'), [11]);
+	assert.deepEqual(await search('search=ALAN%20Turing'), [12]);
+	assert.deepEqual(await search('search=example.org'), [12]);
+	assert.deepEqual(await search('status=processing'), [11]);
+	assert.deepEqual(await search('status='), [12, 11, 10]);
+	assert.deepEqual(await search('search=nobody'), []);
+});
+
+test('GET /admin/orders rejects invalid query parameters', async () => {
+	for (const query of [
+		'page=0',
+		'page=abc',
+		'page=1.5',
+		'status=unknown',
+		`search=${'a'.repeat(101)}`,
+		'search=a&search=b',
+	]) {
+		assert.equal((await get(`/admin/orders?${query}`)).status, 400, query);
+	}
+});
+
+test('GET /admin/orders/:id returns order, customer, items and allowed transitions', async () => {
+	const response = await get('/admin/orders/10');
+	assert.equal(response.status, 200);
+	assert.equal(response.headers.get('cache-control'), 'no-store');
+	assert.deepEqual(await response.json(), {
+		order: {
+			orderId: 10,
+			status: 'PENDING',
+			orderDate: '2026-04-01T10:00:00.000Z',
+			lastUpdated: '2026-04-02T10:00:00.000Z',
+			customer: {
+				id: 1,
+				name: 'Ada Lovelace',
+				email: 'ada@example.com',
+				address: { line1: '1 Analytical Engine Way', line2: '', city: 'London', postcode: 'N1 1AA' },
+			},
+			items: [{ productId: 1, productName: 'Green tea', quantity: 2, unitPrice: 3.5, itemTotal: 7 }],
+			itemCount: 2,
+			orderTotal: 12.5,
+			allowedTransitions: ['PROCESSING', 'CANCELLED'],
+		},
+	});
+});
+
+test('GET /admin/orders/:id returns 404 for unknown or malformed IDs', async () => {
+	for (const id of ['999', '0', '-1', 'abc', '1.5', '0x1', '1e1', '99999999999']) {
+		const response = await get(`/admin/orders/${id}`);
+		assert.equal(response.status, 404, id);
+		assert.deepEqual(await response.json(), { error: 'Order not found' });
+	}
+});
+
+test('POST /admin/orders/:id/status validates status input and missing orders', async () => {
+	for (const id of ['999', '0', 'abc', '1.5', '99999999999']) {
+		const response = await postJson(`/admin/orders/${id}/status`, { status: 'PROCESSING' });
+		assert.equal(response.status, 404, id);
+		assert.deepEqual(await response.json(), { error: 'Order not found' });
+	}
+	for (const body of [{}, { status: 'unknown' }, { status: 1 }, { status: ' ' }]) {
+		assert.equal((await postJson('/admin/orders/10/status', body)).status, 400, JSON.stringify(body));
+	}
+	assert.equal((await postJson('/admin/orders/10/status', null)).status, 400);
+});
+
+test('POST /admin/orders/:id/status applies every allowed fulfilment transition', async () => {
+	const transitions = [
+		['PENDING', 'PROCESSING'],
+		['PENDING', 'CANCELLED'],
+		['PROCESSING', 'SHIPPED'],
+		['PROCESSING', 'CANCELLED'],
+		['SHIPPED', 'DELIVERED'],
+	];
+	for (const [from, to] of transitions) {
+		adminOrders.set(10, makeAdminOrder(10, 1, from));
+		const response = await postJson('/admin/orders/10/status', { status: to.toLowerCase() });
+		assert.equal(response.status, 200, `${from} -> ${to}`);
+		assert.equal(response.headers.get('cache-control'), 'no-store');
+		const body = await response.json();
+		assert.equal(body.order.status, to);
+		assert.equal(adminOrders.get(10).orderStatus, to);
+	}
+});
+
+test('POST /admin/orders/:id/status rejects skipped, post-shipping cancellation, and terminal transitions', async () => {
+	const invalidTransitions = [
+		['PENDING', 'SHIPPED'],
+		['PROCESSING', 'DELIVERED'],
+		['SHIPPED', 'CANCELLED'],
+		['DELIVERED', 'PROCESSING'],
+		['CANCELLED', 'PROCESSING'],
+	];
+	for (const [from, to] of invalidTransitions) {
+		adminOrders.set(10, makeAdminOrder(10, 1, from));
+		const response = await postJson('/admin/orders/10/status', { status: to });
+		assert.equal(response.status, 400, `${from} -> ${to}`);
+		assert.deepEqual(await response.json(), {
+			error: 'Invalid status transition',
+			details: { from, to },
+		});
+		assert.equal(adminOrders.get(10).orderStatus, from);
+	}
+});
+
+test('POST /admin/orders/:id/status rejects a transition after a concurrent status change', async () => {
+	const originalUpdate = adminRepository.updateOrderStatus;
+	adminRepository.updateOrderStatus = async (orderId) => {
+		adminOrders.get(orderId).orderStatus = 'SHIPPED';
+		return false;
+	};
+	try {
+		const response = await postJson('/admin/orders/10/status', { status: 'PROCESSING' });
+		assert.equal(response.status, 400);
+		assert.deepEqual(await response.json(), {
+			error: 'Invalid status transition',
+			details: { from: 'SHIPPED', to: 'PROCESSING' },
+		});
+		assert.equal(adminOrders.get(10).orderStatus, 'SHIPPED');
+	} finally {
+		adminRepository.updateOrderStatus = originalUpdate;
 	}
 });
 

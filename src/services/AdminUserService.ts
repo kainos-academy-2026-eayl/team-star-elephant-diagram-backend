@@ -1,4 +1,5 @@
 import argon2 from 'argon2';
+import type { OrderStatus } from '@prisma/client';
 import {
 	DASHBOARD_BY_ROLE,
 	hasPermission,
@@ -12,20 +13,59 @@ import type {
 	AdminBasketListResponse,
 	AdminBasketSummary,
 	AdminDashboardResponse,
+	AdminOrderDetailsResponse,
+	AdminOrderListResponse,
 	AdminUserDetailsResponse,
 	AdminUserListResponse,
 	AdminUserStatusResponse,
 	AdminUserSummary,
 } from '../models/AdminUser';
 import type { UserStatus } from '../models/user';
-import type { adminRepository } from '../repositories/adminRepository';
+import type { adminRepository, AdminOrderSummaryRecord } from '../repositories/adminRepository';
 import type { UserRepository, UserSummaryRecord } from '../repositories/userRepository';
-import type { BasketService, PricedBasketRecord } from './basketService';
+import { BasketItemNotFoundError, BasketQuantityError, type BasketService, type PricedBasketRecord } from './basketService';
+import { ProductNotFoundError } from './productService';
+import { MAX_ITEM_QUANTITY } from '../validators/basketSchema';
 import type { LoginRequest } from '../validators/loginSchema';
+
+export type AdminBasketErrorCode = 'not_found' | 'customer_not_found' | 'product_not_found' | 'item_not_found' | 'exists' | 'stock';
+
+// Carries an HTTP-mappable code so the controller can return a precise status and message.
+export class AdminBasketError extends Error {
+	constructor(
+		readonly code: AdminBasketErrorCode,
+		message: string,
+		readonly basketId?: number,
+	) {
+		super(message);
+	}
+}
 
 const ADMIN_USERS_PAGE_SIZE = 20;
 const ADMIN_BASKETS_PAGE_SIZE = 20;
+const ADMIN_ORDERS_PAGE_SIZE = 20;
 const ADMIN_USER_RECENT_ORDERS = 5;
+
+// Fulfilment workflow: PENDING -> PROCESSING -> SHIPPED -> DELIVERED; cancellation only before shipping.
+export const ORDER_STATUS_TRANSITIONS: Readonly<Record<OrderStatus, readonly OrderStatus[]>> = {
+	PENDING: ['PROCESSING', 'CANCELLED'],
+	PROCESSING: ['SHIPPED', 'CANCELLED'],
+	SHIPPED: ['DELIVERED'],
+	DELIVERED: [],
+	CANCELLED: [],
+};
+
+export const canTransitionOrder = (from: OrderStatus, to: OrderStatus) => ORDER_STATUS_TRANSITIONS[from].includes(to);
+
+export class InvalidOrderStatusTransitionError extends Error {
+	constructor(
+		readonly from: OrderStatus,
+		readonly to: OrderStatus,
+	) {
+		super(`Cannot change order status from ${from} to ${to}`);
+		this.name = 'InvalidOrderStatusTransitionError';
+	}
+}
 const DASHBOARD_NEW_USERS = 5;
 
 export class InvalidCredentialsError extends Error {
@@ -84,18 +124,26 @@ const DASHBOARD_SECTIONS = [
 	{ label: 'Orders', resource: 'orders', action: 'view' },
 	{ label: 'Inventory', resource: 'inventory', action: 'view' },
 	{ label: 'Finance', resource: 'finance', action: 'view' },
-	{ label: 'Admin accounts', resource: 'admins', action: 'manage' },
-	{ label: 'Permissions', resource: 'permissions', action: 'manage' },
 ] as const satisfies readonly (AdminPermission & { label: string })[];
 
 const DASHBOARD_QUICK_ACTIONS = [
 	{ label: 'Suspend or reactivate customers', resource: 'users', action: 'suspend' },
+	{ label: 'Permanently delete customers', resource: 'users', action: 'delete' },
 	{ label: 'Update order status', resource: 'orders', action: 'update' },
 	{ label: 'Add product', resource: 'inventory', action: 'create' },
 	{ label: 'Update finance records', resource: 'finance', action: 'update' },
-	{ label: 'Manage admin accounts', resource: 'admins', action: 'manage' },
-	{ label: 'Manage permissions', resource: 'permissions', action: 'manage' },
 ] as const satisfies readonly (AdminPermission & { label: string })[];
+
+const NO_PERMISSIONS = { view: false, create: false, update: false, delete: false } as const;
+
+const stockMessage = (available: number, current: number): string => {
+	const limit = Math.min(available, MAX_ITEM_QUANTITY);
+	if (available < 1) return 'This product is out of stock';
+	const room = Math.max(0, limit - current);
+	return current > 0
+		? `Only ${room} more can be added (${limit} maximum, ${current} already in basket)`
+		: `Quantity cannot exceed ${limit} (${available} in stock)`;
+};
 
 const toBasketSummary = (basket: PricedBasketRecord): AdminBasketSummary => ({
 	basketId: basket.basketId,
@@ -105,6 +153,17 @@ const toBasketSummary = (basket: PricedBasketRecord): AdminBasketSummary => ({
 	total: formatPrice(basket.subtotal),
 	lastActivity: formatDate(basket.updatedAt),
 	status: basketStatus(basket),
+});
+
+const toMoney = (amount: { toString(): string }) => Number(amount.toString());
+const roundMoney = (amount: number) => Math.round(amount * 100) / 100;
+
+const toOrderSummary = (order: AdminOrderSummaryRecord) => ({
+	orderId: order.orderId,
+	customer: { id: order.user.userId, name: `${order.user.forename} ${order.user.surname}`, email: order.user.email },
+	status: order.orderStatus,
+	orderDate: order.orderPlacedAt.toISOString(),
+	totalCost: toMoney(order.cost),
 });
 
 export class AdminUserService {
@@ -214,23 +273,217 @@ export class AdminUserService {
 		const basket = await this.baskets.getBasketById(basketId);
 		if (!basket) return null;
 		const summary = toBasketSummary(basket);
+		const products = await this.admins.getProductStock();
+		const stock = new Map(products.map((product) => [product.productId, product.availableStock]));
+		const missing = basket.items.map((item) => item.productId).filter((id) => !stock.has(id));
+		if (missing.length > 0) {
+			for (const product of await this.admins.getProductStock(missing)) {
+				stock.set(product.productId, product.availableStock);
+			}
+		}
+		const inBasket = new Set(basket.items.map((item) => item.productId));
 		return {
 			basket: {
 				basketId: summary.basketId,
 				createdAt: formatDate(basket.createdAt),
 				lastActivity: summary.lastActivity,
 				status: summary.status,
-				customer: { name: summary.customerName, email: summary.customerEmail },
-				items: basket.items.map((item) => ({
-					productName: item.productName,
-					quantity: item.quantity,
-					unitPrice: formatPrice(item.unitPrice),
-					totalPrice: formatPrice(Math.round(item.unitPrice * item.quantity * 100) / 100),
-				})),
+				customer: { id: basket.userId, name: summary.customerName, email: summary.customerEmail },
+				items: basket.items.map((item) => {
+					const availableStock = stock.get(item.productId) ?? 0;
+					return {
+						productId: item.productId,
+						productName: item.productName,
+						quantity: item.quantity,
+						unitPrice: formatPrice(item.unitPrice),
+						totalPrice: formatPrice(Math.round(item.unitPrice * item.quantity * 100) / 100),
+						availableStock,
+						maxQuantity: Math.min(availableStock, MAX_ITEM_QUANTITY),
+						exceedsStock: item.quantity > availableStock,
+					};
+				}),
 				itemCount: summary.itemCount,
 				total: summary.total,
 			},
+			products: products
+				.filter((product) => product.availableStock > 0 && !inBasket.has(product.productId))
+				.map((product) => ({
+					productId: product.productId,
+					name: product.name,
+					unitPrice: formatPrice(product.price),
+					availableStock: product.availableStock,
+					maxQuantity: Math.min(product.availableStock, MAX_ITEM_QUANTITY),
+				})),
 		};
+	}
+
+	// Gets or creates the customer's single basket; throws 'exists' when one is already present.
+	async createBasket(email: string): Promise<{ basketId: number }> {
+		const user = await this.users.findByEmail(email);
+		if (!user) throw new AdminBasketError('customer_not_found', 'No customer has that email address');
+		const { basketId, created } = await this.baskets.createBasket(user.userId);
+		if (!created) throw new AdminBasketError('exists', 'This customer already has a basket', basketId);
+		return { basketId };
+	}
+
+	async addBasketItem(basketId: number, productId: number, quantity: number): Promise<AdminBasketDetailsResponse> {
+		const basket = await this.requireBasket(basketId);
+		const available = await this.availableStock(productId);
+		const current = basket.items.find((item) => item.productId === productId)?.quantity ?? 0;
+		const limit = Math.min(available, MAX_ITEM_QUANTITY);
+		if (current + quantity > limit) {
+			throw new AdminBasketError('stock', stockMessage(available, current));
+		}
+		try {
+			await this.baskets.addItem(basket.userId, productId, quantity, limit);
+		} catch (error) {
+			throw this.toBasketError(error, available, current);
+		}
+		return this.requireDetails(basketId);
+	}
+
+	async updateBasketItem(basketId: number, productId: number, quantity: number): Promise<AdminBasketDetailsResponse> {
+		const basket = await this.requireBasket(basketId);
+		if (!basket.items.some((item) => item.productId === productId)) {
+			throw new AdminBasketError('item_not_found', 'That product is not in this basket');
+		}
+		const available = await this.availableStock(productId);
+		if (quantity > Math.min(available, MAX_ITEM_QUANTITY)) {
+			throw new AdminBasketError('stock', stockMessage(available, 0));
+		}
+		try {
+			await this.baskets.updateItemQuantity(basket.userId, productId, quantity, available);
+		} catch (error) {
+			throw this.toBasketError(error, available, 0);
+		}
+		return this.requireDetails(basketId);
+	}
+
+	async removeBasketItem(basketId: number, productId: number): Promise<AdminBasketDetailsResponse> {
+		const basket = await this.requireBasket(basketId);
+		try {
+			await this.baskets.removeItem(basket.userId, productId);
+		} catch (error) {
+			throw this.toBasketError(error, 0, 0);
+		}
+		return this.requireDetails(basketId);
+	}
+
+	async clearBasket(basketId: number): Promise<AdminBasketDetailsResponse> {
+		if (!(await this.baskets.clearBasket(basketId))) {
+			throw new AdminBasketError('not_found', 'Basket not found');
+		}
+		return this.requireDetails(basketId);
+	}
+
+	async deleteBasket(basketId: number): Promise<boolean> {
+		return this.baskets.deleteBasket(basketId);
+	}
+
+	private async requireBasket(basketId: number): Promise<PricedBasketRecord> {
+		const basket = await this.baskets.getBasketById(basketId);
+		if (!basket) throw new AdminBasketError('not_found', 'Basket not found');
+		return basket;
+	}
+
+	private async requireDetails(basketId: number): Promise<AdminBasketDetailsResponse> {
+		const details = await this.getBasketDetails(basketId);
+		if (!details) throw new AdminBasketError('not_found', 'Basket not found');
+		return details;
+	}
+
+	private async availableStock(productId: number): Promise<number> {
+		const [product] = await this.admins.getProductStock([productId]);
+		if (!product) throw new AdminBasketError('product_not_found', 'Product not found');
+		return product.availableStock;
+	}
+
+	private toBasketError(error: unknown, available: number, current: number): unknown {
+		if (error instanceof ProductNotFoundError) return new AdminBasketError('product_not_found', 'Product not found');
+		if (error instanceof BasketItemNotFoundError) {
+			return new AdminBasketError('item_not_found', 'That product is not in this basket');
+		}
+		if (error instanceof BasketQuantityError) return new AdminBasketError('stock', stockMessage(available, current));
+		return error;
+	}
+
+	async listOrders({
+		search,
+		status,
+		page = 1,
+	}: {
+		search?: string | undefined;
+		status?: OrderStatus | undefined;
+		page?: number | undefined;
+	}): Promise<AdminOrderListResponse> {
+		const pageSize = ADMIN_ORDERS_PAGE_SIZE;
+		const { orders, total } = await this.admins.listOrders({
+			search,
+			status,
+			skip: (page - 1) * pageSize,
+			take: pageSize,
+		});
+		return {
+			orders: orders.map(toOrderSummary),
+			pagination: {
+				page,
+				pageSize,
+				totalPages: Math.max(1, Math.ceil(total / pageSize)),
+				totalOrders: total,
+			},
+		};
+	}
+
+	async getOrderDetails(orderId: number): Promise<AdminOrderDetailsResponse | null> {
+		const order = await this.admins.findOrderById(orderId);
+		if (!order) return null;
+		const { customer, ...summary } = toOrderSummary(order);
+		return {
+			order: {
+				orderId: summary.orderId,
+				status: summary.status,
+				orderDate: summary.orderDate,
+				lastUpdated: order.modifiedAt.toISOString(),
+				customer: {
+					...customer,
+					address: {
+						line1: order.user.addressLine1,
+						line2: order.user.addressLine2,
+						city: order.user.city,
+						postcode: order.user.postcode,
+					},
+				},
+				items: order.orderItems.map((item) => {
+					const unitPrice = toMoney(item.product.price);
+					return {
+						productId: item.productId,
+						productName: item.product.name,
+						quantity: item.quantity,
+						unitPrice,
+						itemTotal: roundMoney(unitPrice * item.quantity),
+					};
+				}),
+				itemCount: order.orderItems.reduce((count, item) => count + item.quantity, 0),
+				orderTotal: summary.totalCost,
+				allowedTransitions: [...ORDER_STATUS_TRANSITIONS[order.orderStatus]],
+			},
+		};
+	}
+
+	// Returns null when the order does not exist; throws InvalidOrderStatusTransitionError for disallowed changes.
+	async updateOrderStatus(orderId: number, status: OrderStatus): Promise<AdminOrderDetailsResponse | null> {
+		const order = await this.admins.findOrderById(orderId);
+		if (!order) return null;
+		if (!canTransitionOrder(order.orderStatus, status)) {
+			throw new InvalidOrderStatusTransitionError(order.orderStatus, status);
+		}
+		if (!(await this.admins.updateOrderStatus(orderId, order.orderStatus, status))) {
+			// Status changed concurrently; report against the latest stored status.
+			const latest = await this.admins.findOrderById(orderId);
+			if (!latest) return null;
+			throw new InvalidOrderStatusTransitionError(latest.orderStatus, status);
+		}
+		return this.getOrderDetails(orderId);
 	}
 
 	async setUserStatus(userId: number, status: UserStatus): Promise<AdminUserStatusResponse | null> {
@@ -239,8 +492,34 @@ export class AdminUserService {
 		return { user: { id: updated.userId, status: toAdminStatus(updated.status) } };
 	}
 
+	async deleteUser(userId: number): Promise<boolean> {
+		return this.users.delete(userId);
+	}
+
 	// Only loads and returns data the admin's role is permitted to view.
 	async getDashboard(admin: AuthenticatedAdmin): Promise<AdminDashboardResponse> {
+		if (admin.role === 'FinanceManager') {
+			const orders = await this.admins.getOrderMetrics();
+			return {
+				staff: { name: `${admin.forename} ${admin.surname}` },
+				inventoryPermissions: NO_PERMISSIONS,
+				basketPermissions: NO_PERMISSIONS,
+				inventorySummary: null,
+				role: admin.role,
+				dashboard: admin.dashboard,
+				sections: [],
+				quickActions: [],
+				cards: [
+					{ label: 'Revenue', value: formatPrice(orders.revenue) },
+					{ label: 'Orders', value: String(orders.totalOrders) },
+					{ label: 'Pending orders', value: String(orders.pendingOrders) },
+				],
+				recentOrders: [],
+				newUsers: [],
+				stockChanges: [],
+				lowStock: null,
+			};
+		}
 		const can = (resource: AdminResource, action: string) => hasPermission(admin.role, resource, action);
 		const [users, baskets, orders, inventory] = await Promise.all([
 			can('users', 'view') ? this.users.list({ skip: 0, take: DASHBOARD_NEW_USERS }) : null,
@@ -264,6 +543,20 @@ export class AdminUserService {
 
 		return {
 			staff: { name: `${admin.forename} ${admin.surname}` },
+			inventoryPermissions: {
+				view: can('inventory', 'view'), create: can('inventory', 'create'),
+				update: can('inventory', 'update'), delete: can('inventory', 'delete'),
+			},
+			basketPermissions: {
+				view: can('baskets', 'view'), create: can('baskets', 'create'),
+				update: can('baskets', 'update'), delete: can('baskets', 'delete'),
+			},
+			inventorySummary: inventory ? {
+				totalProducts: inventory.totalProducts,
+				lowStockProducts: inventory.lowStockProducts,
+				outOfStockProducts: inventory.outOfStockProducts,
+			} : null,
+			lowStock: inventory ? { total: inventory.lowStockLines, items: inventory.lowStockItems } : null,
 			role: admin.role,
 			dashboard: admin.dashboard,
 			sections: DASHBOARD_SECTIONS.filter((s) => can(s.resource, s.action)).map(({ label }) => ({ label })),

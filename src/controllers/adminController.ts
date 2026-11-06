@@ -1,11 +1,14 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
+import { OrderStatus } from '@prisma/client';
 import rateLimit, { type Options as RateLimitOptions } from 'express-rate-limit';
 import { z } from 'zod';
 import { createAuthRateLimiter, rateLimitMax } from '../middleware/authRateLimiter';
 import { DASHBOARD_BY_ROLE, type AdminAction, type AdminResource } from '../models/adminRoles';
 import { requireAdmin, requirePermission } from '../middleware/requireAdmin';
 import {
+	AdminBasketError,
 	InvalidCredentialsError,
+	InvalidOrderStatusTransitionError,
 	UnknownAdminRoleError,
 	type AdminUserService,
 } from '../services/AdminUserService';
@@ -13,6 +16,8 @@ import type { ProductService } from '../services/productService';
 import type { TokenService } from '../services/tokenService';
 import type { AuthSessionService } from '../services/authSessionService';
 import { loginSchema } from '../validators/loginSchema';
+import { createProductSchema } from '../validators/productSchema';
+import { addToBasketSchema, basketItemParamsSchema, updateBasketItemSchema } from '../validators/basketSchema';
 import { sendTokens } from './authController';
 
 const adminRateLimit = rateLimit({
@@ -43,50 +48,41 @@ const basketListQuerySchema = z
 	})
 	.transform(({ search, q, page }) => ({ search: search || q || undefined, page }));
 
-// Upper bound of Product.price, a Postgres DECIMAL(10, 2).
-const MAX_PRODUCT_PRICE = 99_999_999.99;
-
-// Lengths match the VARCHAR limits on the Product model in prisma/schema.prisma.
-const createProductSchema = z.object({
-	imageURL: z
-		.string({ error: 'Image URL is required' })
-		.trim()
-		.min(1, 'Image URL is required')
-		.max(255, 'Image URL must be at most 255 characters')
-		.pipe(z.url({ protocol: /^https?$/, error: 'Image URL must be a valid http(s) URL' })),
-	name: z
-		.string({ error: 'Name is required' })
-		.trim()
-		.min(1, 'Name is required')
-		.max(100, 'Name must be at most 100 characters'),
-	description: z
-		.string({ error: 'Description is required' })
-		.trim()
-		.min(1, 'Description is required')
-		.max(255, 'Description must be at most 255 characters'),
-	category: z
-		.string({ error: 'Category is required' })
-		.trim()
-		.min(1, 'Category is required')
-		.max(100, 'Category must be at most 100 characters'),
-	// Accepts a JSON number or a numeric string (HTML form values arrive as strings).
-	price: z
-		.union(
-			[z.number(), z.string().trim().regex(/^\d+(\.\d+)?$/, 'Price must be a number').transform(Number)],
-			{ error: 'Price is required' },
-		)
-		.pipe(
-			z
-				.number()
-				.finite('Price must be a number')
-				.gt(0, 'Price must be greater than zero')
-				.max(MAX_PRODUCT_PRICE, `Price must be at most ${MAX_PRODUCT_PRICE}`)
-				.refine(
-					(price) => Math.round(price * 100) / 100 === price,
-					'Price must have at most 2 decimal places',
-				),
-		),
+const basketCreateSchema = z.object({ email: z.string().trim().toLowerCase().pipe(z.email()).pipe(z.string().max(255)) });
+const basketItemCreateSchema = addToBasketSchema.extend({
+	quantity: addToBasketSchema.shape.quantity.unwrap(),
 });
+
+const BASKET_ERROR_STATUS: Record<AdminBasketError['code'], number> = {
+	not_found: 404,
+	customer_not_found: 404,
+	product_not_found: 404,
+	item_not_found: 404,
+	exists: 409,
+	stock: 409,
+};
+
+// Case-insensitive so form values like "shipped" are accepted.
+const orderStatusSchema = z.preprocess(
+	(value) => (typeof value === 'string' ? value.trim().toUpperCase() : value),
+	z.enum(OrderStatus),
+);
+
+// Same search/page contract as /admin/baskets, plus an optional status filter for fulfilment queues.
+const orderListQuerySchema = z
+	.object({
+		search: z.string().trim().max(100).optional(),
+		q: z.string().trim().max(100).optional(),
+		status: z.union([z.literal(''), orderStatusSchema]).optional(),
+		page: z.coerce.number().int().positive().max(100_000).optional(),
+	})
+	.transform(({ search, q, status, page }) => ({
+		search: search || q || undefined,
+		status: status || undefined,
+		page,
+	}));
+
+const orderStatusUpdateSchema = z.object({ status: orderStatusSchema });
 
 export function adminController(
 	adminService: AdminUserService,
@@ -259,6 +255,24 @@ export function adminController(
 		},
 	);
 
+	router.post(
+		'/admin/users/:id/delete',
+		...authorize('users', 'delete'),
+		async (req: Request, res: Response) => {
+			const userId = userIdSchema.safeParse(req.params.id);
+			try {
+				if (!userId.success || !(await adminService.deleteUser(userId.data))) {
+					res.status(404).json({ error: 'User not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json({ deleted: true });
+			} catch (error) {
+				console.error('Admin user deletion failed', error);
+				res.status(500).json({ error: 'The customer could not be deleted. Please try again.' });
+			}
+		},
+	);
+
 	for (const [action, status] of [
 		['suspend', 'SUSPENDED'],
 		['reactivate', 'ACTIVE'],
@@ -318,6 +332,222 @@ export function adminController(
 				res.set('Cache-Control', 'no-store').json(details);
 			} catch (error) {
 				console.error('Admin basket lookup failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	const sendBasketError = (res: Response, error: unknown, action: string): void => {
+		if (error instanceof AdminBasketError) {
+			res.status(BASKET_ERROR_STATUS[error.code]).json({
+				error: error.message,
+				code: error.code,
+				...(error.basketId === undefined ? {} : { basketId: error.basketId }),
+			});
+			return;
+		}
+		console.error(`Admin basket ${action} failed`, error);
+		res.status(500).json({ error: 'Internal server error' });
+	};
+
+	const invalid = (res: Response, message: string, error: z.ZodError): void => {
+		res.status(400).json({ error: message, details: z.flattenError(error).fieldErrors });
+	};
+
+	router.post(
+		'/admin/baskets',
+		...authorize('baskets', 'create'),
+		async (req: Request, res: Response) => {
+			const input = basketCreateSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				invalid(res, 'Invalid customer email', input.error);
+				return;
+			}
+			try {
+				const { basketId } = await adminService.createBasket(input.data.email);
+				res.status(201).location(`/admin/baskets/${basketId}`).set('Cache-Control', 'no-store').json({ basketId });
+			} catch (error) {
+				sendBasketError(res, error, 'creation');
+			}
+		},
+	);
+
+	router.post(
+		'/admin/baskets/:id/items',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			if (!basketId.success) {
+				res.status(404).json({ error: 'Basket not found' });
+				return;
+			}
+			const input = basketItemCreateSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				invalid(res, 'Invalid basket item', input.error);
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(
+					await adminService.addBasketItem(basketId.data, input.data.productId, input.data.quantity),
+				);
+			} catch (error) {
+				sendBasketError(res, error, 'item add');
+			}
+		},
+	);
+
+	router.patch(
+		'/admin/baskets/:id/items/:productId',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			const params = basketItemParamsSchema.safeParse(req.params);
+			if (!basketId.success || !params.success) {
+				res.status(404).json({ error: 'Basket item not found' });
+				return;
+			}
+			const input = updateBasketItemSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				invalid(res, 'Invalid basket item', input.error);
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(
+					await adminService.updateBasketItem(basketId.data, params.data.productId, input.data.quantity),
+				);
+			} catch (error) {
+				sendBasketError(res, error, 'item update');
+			}
+		},
+	);
+
+	router.delete(
+		'/admin/baskets/:id/items/:productId',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			const params = basketItemParamsSchema.safeParse(req.params);
+			if (!basketId.success || !params.success) {
+				res.status(404).json({ error: 'Basket item not found' });
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(
+					await adminService.removeBasketItem(basketId.data, params.data.productId),
+				);
+			} catch (error) {
+				sendBasketError(res, error, 'item removal');
+			}
+		},
+	);
+
+	router.delete(
+		'/admin/baskets/:id/items',
+		...authorize('baskets', 'update'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			if (!basketId.success) {
+				res.status(404).json({ error: 'Basket not found' });
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(await adminService.clearBasket(basketId.data));
+			} catch (error) {
+				sendBasketError(res, error, 'clear');
+			}
+		},
+	);
+
+	router.delete(
+		'/admin/baskets/:id',
+		...authorize('baskets', 'delete'),
+		async (req: Request, res: Response) => {
+			const basketId = userIdSchema.safeParse(req.params.id);
+			try {
+				if (!basketId.success || !(await adminService.deleteBasket(basketId.data))) {
+					res.status(404).json({ error: 'Basket not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json({ deleted: true });
+			} catch (error) {
+				sendBasketError(res, error, 'deletion');
+			}
+		},
+	);
+
+	router.get(
+		'/admin/orders',
+		...authorize('orders', 'view'),
+		async (req: Request, res: Response) => {
+			const query = orderListQuerySchema.safeParse(req.query);
+			if (!query.success) {
+				res.status(400).json({
+					error: 'Invalid order search',
+					details: z.flattenError(query.error).fieldErrors,
+				});
+				return;
+			}
+			try {
+				res.set('Cache-Control', 'no-store').json(await adminService.listOrders(query.data));
+			} catch (error) {
+				console.error('Admin order list failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.get(
+		'/admin/orders/:id',
+		...authorize('orders', 'view'),
+		async (req: Request, res: Response) => {
+			const orderId = userIdSchema.safeParse(req.params.id);
+			try {
+				const details = orderId.success ? await adminService.getOrderDetails(orderId.data) : null;
+				if (!details) {
+					res.status(404).json({ error: 'Order not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json(details);
+			} catch (error) {
+				console.error('Admin order lookup failed', error);
+				res.status(500).json({ error: 'Internal server error' });
+			}
+		},
+	);
+
+	router.post(
+		'/admin/orders/:id/status',
+		...authorize('orders', 'update'),
+		async (req: Request, res: Response) => {
+			const orderId = userIdSchema.safeParse(req.params.id);
+			if (!orderId.success) {
+				res.status(404).json({ error: 'Order not found' });
+				return;
+			}
+			const input = orderStatusUpdateSchema.safeParse(req.body ?? {});
+			if (!input.success) {
+				res.status(400).json({
+					error: 'Invalid order status',
+					details: z.flattenError(input.error).fieldErrors,
+				});
+				return;
+			}
+			try {
+				const result = await adminService.updateOrderStatus(orderId.data, input.data.status);
+				if (!result) {
+					res.status(404).json({ error: 'Order not found' });
+					return;
+				}
+				res.set('Cache-Control', 'no-store').json(result);
+			} catch (error) {
+				if (error instanceof InvalidOrderStatusTransitionError) {
+					res.status(400).json({
+						error: 'Invalid status transition',
+						details: { from: error.from, to: error.to },
+					});
+					return;
+				}
+				console.error('Admin order status update failed', error);
 				res.status(500).json({ error: 'Internal server error' });
 			}
 		},

@@ -21,9 +21,23 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum ReservationStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  CONVERTED
+}
+
+
 enum UserStatus {
   ACTIVE
   SUSPENDED
+}
+
+enum StockStatus {
+  IN_STOCK
+  LOW_STOCK
+  OUT_OF_STOCK
 }
 
 model User {
@@ -43,11 +57,16 @@ model User {
   status         UserStatus      @default(ACTIVE)
   orders         Order[]
   paymentDetails PaymentDetail[]
-  basket        Basket?
+  basket         Basket?
+  reservations   Reservation[]
 }
 
 model Product {
   productId   Int               @id @unique @default(autoincrement()) @map("prodid")
+  sku         String            @unique @default(dbgenerated("('SKU-'::text || (gen_random_uuid())::text)")) @db.VarChar(64)
+  stockQuantity Int             @default(0)
+  lowStockThreshold Int         @default(0)
+  stockStatus StockStatus       @default(OUT_OF_STOCK)
   name        String            @db.VarChar(100)
   category    String            @default("Uncategorised") @db.VarChar(100)
   description String            @db.VarChar(255)
@@ -60,9 +79,12 @@ model Product {
   basketItems BasketItem[]
   orderItems  OrderItem[]
   images      ProductImage[]
+  reservationItems ReservationItem[]
+  stockAdjustments StockAdjustment[]
 
 
   @@index([name])
+  @@index([stockStatus, productId])
 }
 
 model AdminUser {
@@ -74,6 +96,24 @@ model AdminUser {
   passwordHash String   @map("password_hash")
   createdAt    DateTime @default(now()) @map("created_at")
   modifiedAt   DateTime @default(now()) @updatedAt @map("modified_at")
+  stockAdjustments StockAdjustment[]
+}
+
+model StockAdjustment {
+  id            String    @id @default(uuid())
+  productId     Int
+  product       Product   @relation(fields: [productId], references: [productId], onDelete: Restrict)
+  adjustedById  Int
+  adjustedBy    AdminUser @relation(fields: [adjustedById], references: [adminId], onDelete: Restrict)
+  adjustment    Int
+  previousStock Int
+  newStock      Int
+  reason        String    @db.VarChar(255)
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  @@index([productId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([adjustedById])
 }
 
 model RefreshSession {
@@ -90,6 +130,7 @@ model RefreshSession {
 model Inventory {
   inventoryId     Int      @id @unique @default(autoincrement()) @map("inventory_id")
   quantity        Int      @default(0)
+  reservedQuantity Int     @default(0) @map("reserved_quantity")
   maximumQuantity Int      @default(0) @map("qty_limit")
   reorderLevel    Int      @default(0) @map("reorder_level")
   modifiedAt      DateTime @default(now()) @updatedAt @map("modified_at")
@@ -98,17 +139,36 @@ model Inventory {
   product         Product  @relation(fields: [productId], references: [productId])
   supplierId      Int      @map("supplier_id")
   supplier        Supplier @relation(fields: [supplierId], references: [supplierId])
+  reservationAllocations ReservationInventoryAllocation[]
+
+  @@index([reservedQuantity])
+  @@index([productId, inventoryId])
 }
+
+model ReservationInventoryAllocation {
+  allocationId      Int             @id @default(autoincrement()) @map("allocation_id")
+  reservationItemId Int             @map("reservation_item_id")
+  reservationItem   ReservationItem @relation(fields: [reservationItemId], references: [reservationItemId], onDelete: Cascade)
+  inventoryId       Int             @map("inventory_id")
+  inventory         Inventory       @relation(fields: [inventoryId], references: [inventoryId], onDelete: Restrict)
+  quantity          Int
+
+  @@unique([reservationItemId, inventoryId])
+  @@index([inventoryId])
+}
+
 
 model Order {
   orderId       Int         @id @unique @default(autoincrement()) @map("order_id")
   orderPlacedAt DateTime    @default(now()) @map("order_placed_at")
   orderStatus   OrderStatus @default(PENDING) @map("order_status")
   cost          Decimal     @map("cost") @db.Decimal(10, 2)
+  shippingFee   Decimal     @default(20.00) @map("shipping_fee") @db.Decimal(10, 2)
   modifiedAt    DateTime    @default(now()) @updatedAt @map("modified_at")
   userId        Int
   user          User        @relation(fields: [userId], references: [userId])
   orderItems    OrderItem[]
+  reservation   Reservation?
 
   @@index([orderStatus])
 }
@@ -135,6 +195,7 @@ model OrderItem {
   orderId   Int
   productId Int
   quantity  Int     @default(1)
+  unitPrice Decimal @map("unit_price") @db.Decimal(10, 2)
   order     Order   @relation(fields: [orderId], references: [orderId])
   product   Product @relation(fields: [productId], references: [productId])
 
@@ -181,4 +242,40 @@ model ProductImage {
   position  Int     @default(0)
 
   @@unique([productId, position])
+}
+
+
+// Reservations are kept as history; only one ACTIVE reservation per user is allowed
+// (enforced by the partial unique index "Reservation_userId_active_key" in migration 20261105100000).
+model Reservation {
+  reservationId  Int               @id @unique @default(autoincrement()) @map("reservation_id")
+  userId         Int
+  user           User              @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  items          ReservationItem[]
+ 
+  status         ReservationStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
+  expiresAt      DateTime          @map("expiresAt")
+  releasedAt     DateTime?         @map("released_at")
+  orderId        Int?              @unique @map("order_id")
+  order          Order?            @relation(fields: [orderId], references: [orderId], onDelete: SetNull)
+
+  @@index([expiresAt])
+  
+  @@index([status, expiresAt])
+  @@index([userId, status])
+}
+
+model ReservationItem {
+  reservationItemId Int    @id @unique @default(autoincrement()) @map("reservation_item_id")
+  reservationId     Int
+  reservation       Reservation @relation(fields: [reservationId], references: [reservationId], onDelete: Cascade)
+  productId    Int
+  product      Product @relation(fields: [productId], references: [productId])
+  quantity     Int
+  createdAt    DateTime @default(now()) @map("created_at")
+  inventoryAllocations ReservationInventoryAllocation[]
+
+  @@unique([reservationId, productId])
 }

@@ -5,7 +5,11 @@ import nunjucks from 'nunjucks';
 import { join } from 'node:path';
 import { createBasketRouter } from './controllers/basketController';
 import { createProductRouter } from './controllers/productController';
+import { createCheckoutRouter } from './controllers/checkoutController';
+import { createPaymentRouter } from './controllers/paymentController';
 import { createDatabaseBasketRepository, type BasketRepository } from './repositories/basketRepository';
+import { createDatabaseReservationRepository, type ReservationRepository } from './repositories/reservationRepository';
+import { createDatabaseInventoryRepository, type InventoryRepository } from './repositories/inventoryRepository';
 import { productRepository, type ProductRepository } from './repositories/productRepository';
 import { prismaUserRepository, type UserRepository } from './repositories/userRepository';
 import { prismaAdminUserRepository, type adminRepository } from './repositories/adminRepository';
@@ -15,6 +19,9 @@ import { adminController } from './controllers/adminController';
 import { BasketService } from './services/basketService';
 import { ProductService } from './services/productService';
 import { UserService } from './services/userService';
+import { ReservationService } from './services/checkoutReservationService';
+import { OrderService } from './services/orderService';
+import { ReservationExpirationJob } from './services/reservationExpirationJob';
 import { userController } from './controllers/userController';
 import { authController } from './controllers/authController';
 import { AuthSessionService } from './services/authSessionService';
@@ -22,11 +29,17 @@ import { prismaRefreshSessionRepository, type RefreshSessionRepository } from '.
 import { prismaPasswordResetRepository, type PasswordResetRepository } from './repositories/passwordResetRepository';
 import { createConsoleResetDelivery, PasswordResetService, type PasswordResetDelivery } from './services/passwordResetService';
 import { passwordResetController } from './controllers/passwordResetController';
+import { createReservationRouter } from './controllers/reservationRouter';
+import { reservationCleanupMiddleware } from './middleware/reservationCleanup';
 import prisma from './prismaClient';
+import { InventoryService } from './services/inventoryService';
+import { createInventoryRouter } from './routes/inventoryRoutes';
 
 export interface AppDependencies {
 	productRepository?: ProductRepository;
 	basketRepository?: BasketRepository;
+	reservationRepository?: ReservationRepository;
+	inventoryRepository?: InventoryRepository;
 	userRepository?: UserRepository;
 	adminRepository?: adminRepository;
 	tokenService?: TokenService;
@@ -35,11 +48,19 @@ export interface AppDependencies {
 	trustedProxyAddresses?: string[];
 	passwordResetRepository?: PasswordResetRepository;
 	passwordResetDelivery?: PasswordResetDelivery;
+	startReservationExpirationJob?: boolean;
+	adminInventoryService?: InventoryService;
+}
+
+export interface AppWithServices extends Express {
+	reservationExpirationJob?: ReservationExpirationJob;
 }
 
 export function createApp({
 	productRepository: productsRepository = productRepository,
 	basketRepository = createDatabaseBasketRepository(prisma),
+	reservationRepository = createDatabaseReservationRepository(prisma),
+	inventoryRepository = createDatabaseInventoryRepository(prisma),
 	userRepository = prismaUserRepository,
 	adminRepository = prismaAdminUserRepository,
 	tokenService = createTokenService(),
@@ -48,8 +69,10 @@ export function createApp({
 	trustedProxyAddresses = process.env.TRUSTED_PROXY_IPS?.split(',').map((address) => address.trim()).filter(Boolean) ?? [],
 	passwordResetRepository = prismaPasswordResetRepository,
 	passwordResetDelivery = createConsoleResetDelivery(),
-}: AppDependencies = {}): Express {
-	const app = express();
+	startReservationExpirationJob = true,
+	adminInventoryService = new InventoryService(prisma),
+}: AppDependencies = {}): AppWithServices {
+	const app = express() as AppWithServices;
 	app.set('trust proxy', trustedProxyAddresses);
 
 	nunjucks.configure(join(import.meta.dirname, 'views'), {
@@ -75,13 +98,32 @@ export function createApp({
 	const sessions = new AuthSessionService(tokenService, refreshSessionRepository);
 
 	const productService = new ProductService(productsRepository);
+	const reservationService = new ReservationService(
+		reservationRepository,
+		inventoryRepository,
+		productsRepository,
+		basketRepository,
+	);
+	const orderService = new OrderService(prisma, productsRepository, basketRepository);
 
+	app.use(reservationCleanupMiddleware);
 	app.use(userController(userService, sessions, tokenService, authRateLimitOptions));
+	app.use(createReservationRouter(tokenService));
 	app.use('/products', createProductRouter(productService));
 	app.use('/basket', createBasketRouter(basketService, tokenService));
+	app.use('/checkout', createCheckoutRouter(reservationService, tokenService));
+	app.use('/payment', createPaymentRouter(orderService, tokenService));
 	app.use(adminController(adminService, tokenService, sessions, productService, authRateLimitOptions));
+	app.use('/api/admin/inventory', createInventoryRouter(adminInventoryService, adminService, tokenService));
 	app.use(authController(sessions, adminService, userService));
 	app.use(passwordResetController(new PasswordResetService(userRepository, passwordResetRepository, passwordResetDelivery)));
+
+	// Start reservation expiration job
+	if (startReservationExpirationJob) {
+		const expirationJob = new ReservationExpirationJob(reservationService);
+		expirationJob.start();
+		app.reservationExpirationJob = expirationJob;
+	}
 
 	app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
 		if (error instanceof SyntaxError && 'status' in error && error.status === 400) {

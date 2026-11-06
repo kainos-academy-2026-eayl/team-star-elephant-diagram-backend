@@ -10,6 +10,8 @@ import { memoryRefreshSessions } from './helpers/refreshSessions.mjs';
 
 const customerSecret = 'customer-access-secret-at-least-32-bytes';
 process.env.JWT_SECRET = customerSecret;
+// The RBAC matrix sends more requests from one IP than the default admin rate limit allows.
+process.env.RATE_LIMIT_MAX = '1000';
 const tokens = new TokenService(
 	'admin-access-secret-at-least-32-bytes',
 	'refresh-secret-at-least-32-bytes-long',
@@ -22,12 +24,13 @@ const ALL_PERMISSIONS = Object.entries(ADMIN_RESOURCE_ACTIONS).flatMap(([resourc
 	actions.map((action) => [resource, action]),
 );
 
-// Expected grants per role, exactly as specified in KAN-97. Anything not listed must be denied.
+// Anything not listed must be denied; finance is dashboard-only and read-only.
 const EXPECTED = {
-	Admin: ['users:view', 'users:suspend', 'users:reactivate', 'baskets:view', 'orders:view', 'orders:update', 'inventory:view', 'finance:view'],
+	Admin: ['users:view', 'users:delete', 'users:suspend', 'users:reactivate', 'baskets:view', 'baskets:create', 'baskets:update', 'baskets:delete', 'orders:view', 'orders:update', 'inventory:view', 'finance:view'],
 	CustomerService: ['users:view', 'baskets:view', 'orders:view', 'inventory:view'],
 	InventoryManager: ['inventory:view', 'inventory:create', 'inventory:update', 'inventory:delete', 'orders:view'],
-	FinanceManager: ['finance:view', 'finance:update', 'orders:view', 'inventory:view'],
+	WarehouseStaff: ['inventory:view', 'inventory:update'],
+	FinanceManager: ['finance:view'],
 };
 
 test('SuperAdmin bypasses every permission check', () => {
@@ -58,7 +61,7 @@ test('no role other than SuperAdmin can manage admin accounts or permissions', (
 test('unknown roles, resources and actions are denied', () => {
 	assert.equal(hasPermission('Intern', 'users', 'view'), false);
 	assert.equal(hasPermission('', 'users', 'view'), false);
-	assert.equal(hasPermission('Admin', 'users', 'delete'), false);
+	assert.equal(hasPermission('CustomerService', 'users', 'delete'), false);
 	assert.equal(hasPermission('Admin', 'unknown', 'view'), false);
 	assert.equal(hasPermission('Admin', 'users', 'launch'), false);
 });
@@ -118,6 +121,25 @@ test('requirePermission denies admins whose stored role is not recognised', () =
 const ROLE_IDS = { SuperAdmin: 1, Admin: 2, InventoryManager: 3, FinanceManager: 4, CustomerService: 5 };
 const admins = new Map();
 const adminCalls = { orders: 0, inventory: 0 };
+let orderStatus = 'PENDING';
+const orderRecord = () => ({
+	orderId: 42,
+	orderPlacedAt: new Date('2026-04-02T10:00:00Z'),
+	orderStatus,
+	cost: '12.50',
+	modifiedAt: new Date('2026-04-02T10:00:00Z'),
+	user: {
+		userId: 1,
+		forename: 'Ada',
+		surname: 'Lovelace',
+		email: 'ada@example.com',
+		addressLine1: '1 Analytical Engine Way',
+		addressLine2: '',
+		city: 'London',
+		postcode: 'N1 1AA',
+	},
+	orderItems: [{ productId: 1, quantity: 1, product: { name: 'Green tea', price: '3.50' } }],
+});
 const adminRepository = {
 	async findByEmail() {
 		return null;
@@ -134,13 +156,34 @@ const adminRepository = {
 			recentOrders: [{ orderId: 12, customer: 'Grace Hopper', placedAt: new Date('2026-04-02T10:00:00Z'), status: 'PENDING' }],
 		};
 	},
+	async getProductStock(productIds) {
+		return (productIds ?? [1]).filter((id) => id === 1)
+			.map((productId) => ({ productId, name: 'Green tea', price: 3.5, availableStock: 50 }));
+	},
 	async getInventoryMetrics() {
 		adminCalls.inventory++;
 		return {
+			totalProducts: 12, lowStockProducts: 3, outOfStockProducts: 2,
 			unitsInStock: 120,
 			lowStockLines: 2,
+			lowStockItems: [
+				{ inventoryId: 7, product: 'Black tea', supplier: 'Tea supplier', quantity: 0, reorderLevel: 5 },
+				{ inventoryId: 8, product: 'White tea', supplier: 'Tea supplier', quantity: 3, reorderLevel: 3 },
+			],
 			recentStockChanges: [{ product: 'Green tea', quantity: 40, modifiedAt: new Date('2026-10-01T09:00:00Z') }],
 		};
+	},
+	async listOrders() {
+		const { orderId, orderPlacedAt, orderStatus, cost, user } = orderRecord();
+		return { orders: [{ orderId, orderPlacedAt, orderStatus, cost, user }], total: 1 };
+	},
+	async findOrderById(orderId) {
+		return orderId === 42 ? orderRecord() : null;
+	},
+	async updateOrderStatus(orderId, from, to) {
+		if (orderId !== 42 || orderStatus !== from) return false;
+		orderStatus = to;
+		return true;
 	},
 };
 
@@ -169,6 +212,9 @@ const userRepository = {
 		if (!user) return null;
 		user.status = status;
 		return { userId, status };
+	},
+	async delete(userId) {
+		return users.delete(userId);
 	},
 };
 
@@ -245,10 +291,17 @@ beforeEach(() => {
 	adminCalls.orders = 0;
 	adminCalls.inventory = 0;
 	userListCalls = 0;
+	orderStatus = 'PENDING';
 });
 
 const call = (method, path, token) =>
 	fetch(`${url}${path}`, { method, headers: token ? { authorization: `Bearer ${token}` } : {} });
+
+const callWithBody = (method, path, token, body) => {
+	const headers = { 'content-type': 'application/json' };
+	if (token) headers.authorization = ['Bearer', token].join(' ');
+	return fetch(`${url}${path}`, { method, headers, body: JSON.stringify(body) });
+};
 
 const ROUTES = [
 	['GET', '/admin/users', 'users:view'],
@@ -257,22 +310,59 @@ const ROUTES = [
 	['POST', '/admin/users/1/reactivate', 'users:reactivate'],
 	['GET', '/admin/baskets', 'baskets:view'],
 	['GET', '/admin/baskets/123', 'baskets:view'],
+	['GET', '/admin/orders', 'orders:view'],
+	['GET', '/admin/orders/42', 'orders:view'],
+	['POST', '/admin/orders/42/status', 'orders:update', { status: 'PROCESSING' }],
+	['POST', '/admin/users/1/delete', 'users:delete'],
 ];
 
 for (const role of Object.keys(ROLE_IDS)) {
 	test(`${role} can only reach the admin endpoints its permissions allow`, async () => {
-		for (const [method, path, permission] of ROUTES) {
+		for (const [method, path, permission, body] of ROUTES) {
 			const allowed = role === 'SuperAdmin' || EXPECTED[role].includes(permission);
-			const response = await call(method, path, roleTokens[role]);
+			const response = body
+				? await callWithBody(method, path, roleTokens[role], body)
+				: await call(method, path, roleTokens[role]);
 			assert.equal(response.status, allowed ? 200 : 403, `${role} ${method} ${path}`);
 			if (!allowed) assert.deepEqual(await response.json(), { error: 'Forbidden' });
+		}
+		assert.equal(orderStatus, role === 'SuperAdmin' || EXPECTED[role].includes('orders:update') ? 'PROCESSING' : 'PENDING');
+	});
+}
+
+// Mutations stop at the permission check for denied roles; allowed roles reach validation (400) instead.
+const BASKET_MUTATIONS = [
+	['POST', '/admin/baskets', 'baskets:create'],
+	['POST', '/admin/baskets/123/items', 'baskets:update'],
+	['PATCH', '/admin/baskets/123/items/1', 'baskets:update'],
+	['DELETE', '/admin/baskets/123/items/1', 'baskets:update'],
+	['DELETE', '/admin/baskets/123/items', 'baskets:update'],
+	['DELETE', '/admin/baskets/999', 'baskets:delete'],
+];
+
+for (const role of Object.keys(ROLE_IDS)) {
+	test(`${role} can only change baskets when its permissions allow`, async () => {
+		for (const [method, path, permission] of BASKET_MUTATIONS) {
+			const allowed = role === 'SuperAdmin' || EXPECTED[role].includes(permission);
+			const response = await callWithBody(method, path, roleTokens[role], {});
+			if (allowed) assert.notEqual(response.status, 403, `${role} ${method} ${path}`);
+			else assert.equal(response.status, 403, `${role} ${method} ${path}`);
 		}
 	});
 }
 
+test('basket mutations require authentication', async () => {
+	for (const [method, path] of BASKET_MUTATIONS) {
+		assert.equal((await callWithBody(method, path, undefined, {})).status, 401, `${method} ${path}`);
+	}
+});
+
 test('protected admin endpoints still require authentication (401 before 403)', async () => {
-	for (const [method, path] of ROUTES) {
-		assert.equal((await call(method, path)).status, 401, `${method} ${path}`);
+	for (const [method, path, , body] of ROUTES) {
+		const response = body
+			? await callWithBody(method, path, undefined, body)
+			: await call(method, path);
+		assert.equal(response.status, 401, `${method} ${path}`);
 	}
 });
 
@@ -315,6 +405,18 @@ test('GET /admin keeps the dashboard response structure for every role', async (
 		const body = await dashboardFor(role);
 		assert.deepEqual(body.staff, { name: `Test ${role}` });
 		assert.equal(body.role, role);
+		assert.deepEqual(body.inventoryPermissions, Object.fromEntries(
+			['view', 'create', 'update', 'delete'].map((action) => [action, hasPermission(role, 'inventory', action)]),
+		));
+		assert.deepEqual(body.basketPermissions, Object.fromEntries(
+			['view', 'create', 'update', 'delete'].map((action) => [action, hasPermission(role, 'baskets', action)]),
+		));
+		// FinanceManager gets a financial-only dashboard without inventory data.
+		if (role !== 'FinanceManager') {
+			assert.deepEqual(body.inventorySummary, { totalProducts: 12, lowStockProducts: 3, outOfStockProducts: 2 });
+			assert.equal(body.lowStock.total, 2);
+			assert.equal(body.lowStock.items[0].product, 'Black tea');
+		}
 		for (const key of ['sections', 'quickActions', 'cards', 'recentOrders', 'newUsers', 'stockChanges']) {
 			assert.ok(Array.isArray(body[key]), `${role} ${key}`);
 		}
@@ -323,9 +425,11 @@ test('GET /admin keeps the dashboard response structure for every role', async (
 
 test('SuperAdmin dashboard has full operational visibility', async () => {
 	const body = await dashboardFor('SuperAdmin');
-	assert.deepEqual(labels(body.sections), ['Users', 'Baskets', 'Orders', 'Inventory', 'Finance', 'Admin accounts', 'Permissions']);
+	assert.deepEqual(labels(body.sections), ['Users', 'Baskets', 'Orders', 'Inventory', 'Finance']);
 	assert.deepEqual(labels(body.cards), ['Customers', 'Customer baskets', 'Orders', 'Pending orders', 'Revenue', 'Units in stock', 'Low stock lines']);
-	assert.ok(labels(body.quickActions).includes('Manage admin accounts'));
+	assert.ok(!labels(body.quickActions).includes('Manage admin accounts'));
+	assert.ok(!labels(body.quickActions).includes('Manage permissions'));
+	assert.ok(labels(body.quickActions).includes('Permanently delete customers'));
 	assert.equal(body.recentOrders.length, 1);
 	assert.equal(body.newUsers.length, 1);
 	assert.equal(body.stockChanges.length, 1);
@@ -334,7 +438,7 @@ test('SuperAdmin dashboard has full operational visibility', async () => {
 test('Admin dashboard shows customer and operations metrics without admin management', async () => {
 	const body = await dashboardFor('Admin');
 	assert.deepEqual(labels(body.sections), ['Users', 'Baskets', 'Orders', 'Inventory', 'Finance']);
-	assert.deepEqual(labels(body.quickActions), ['Suspend or reactivate customers', 'Update order status']);
+	assert.deepEqual(labels(body.quickActions), ['Suspend or reactivate customers', 'Permanently delete customers', 'Update order status']);
 	assert.ok(labels(body.cards).includes('Customers'));
 	assert.ok(labels(body.cards).includes('Revenue'));
 });
@@ -358,16 +462,44 @@ test('InventoryManager dashboard shows stock metrics and no customer data', asyn
 	assert.equal(userListCalls, 0, 'customer data must not be loaded');
 });
 
-test('FinanceManager dashboard shows revenue metrics and no customer or basket data', async () => {
+test('low-stock inventory lines are only returned to roles with inventory view permission', async () => {
+	for (const role of Object.keys(ROLE_IDS)) {
+		const body = await dashboardFor(role);
+		if (!hasPermission(role, 'inventory', 'view')) {
+			assert.equal(body.lowStock, null);
+			continue;
+		}
+		assert.equal(body.lowStock.total, 2);
+		assert.deepEqual(body.lowStock.items, [
+			{ inventoryId: 7, product: 'Black tea', supplier: 'Tea supplier', quantity: 0, reorderLevel: 5 },
+			{ inventoryId: 8, product: 'White tea', supplier: 'Tea supplier', quantity: 3, reorderLevel: 3 },
+		]);
+	}
+});
+
+test('FinanceManager dashboard only shows financial summary metrics without actions or operational data', async () => {
 	const body = await dashboardFor('FinanceManager');
-	assert.deepEqual(labels(body.sections), ['Orders', 'Inventory', 'Finance']);
-	assert.deepEqual(labels(body.quickActions), ['Update finance records']);
-	assert.ok(labels(body.cards).includes('Revenue'));
-	assert.equal(body.cards.find((card) => card.label === 'Revenue').value, '£367.49');
-	assert.ok(!labels(body.cards).includes('Customers'));
-	assert.ok(!labels(body.cards).includes('Customer baskets'));
+	assert.deepEqual(body.sections, []);
+	assert.deepEqual(body.quickActions, []);
+	assert.deepEqual(body.cards, [
+		{ label: 'Revenue', value: '£367.49' },
+		{ label: 'Orders', value: '3' },
+		{ label: 'Pending orders', value: '1' },
+	]);
+	assert.deepEqual(body.recentOrders, []);
 	assert.deepEqual(body.newUsers, []);
+	assert.deepEqual(body.stockChanges, []);
 	assert.equal(userListCalls, 0, 'customer data must not be loaded');
+	assert.equal(adminCalls.inventory, 0, 'inventory data must not be loaded');
+	assert.equal(adminCalls.orders, 1);
+});
+
+test('FinanceManager cannot open order management directly', async () => {
+	for (const path of ['/admin/orders', '/admin/orders/12']) {
+		const response = await call('GET', path, roleTokens.FinanceManager);
+		assert.equal(response.status, 403);
+		assert.deepEqual(await response.json(), { error: 'Forbidden' });
+	}
 });
 
 test('GET /admin returns 500 when dashboard data cannot be loaded', async () => {

@@ -5,9 +5,9 @@ import { products } from '../prisma/products.ts'
 const hardwareCategories = ['Laptops', 'Monitors', 'Keyboards', 'Mice', 'Headsets']
 const isHardware = (product) => hardwareCategories.includes(product.category)
 
-test('product seed contains 81 uniquely named hardware and merchandise products', () => {
-  assert.equal(products.length, 81)
-  assert.equal(new Set(products.map((product) => product.name)).size, 81)
+test('product seed contains 99 uniquely named hardware and merchandise products', () => {
+  assert.equal(products.length, 99)
+  assert.equal(new Set(products.map((product) => product.name)).size, 99)
 
   const counts = {}
   for (const product of products) {
@@ -20,8 +20,8 @@ test('product seed contains 81 uniquely named hardware and merchandise products'
     Keyboards: 10,
     Mice: 10,
     Headsets: 10,
-    'T-Shirts': 5,
-    Hats: 4,
+    'T-Shirts': 6,
+    Hats: 5,
     Scarves: 1,
     Keyrings: 4,
     Socks: 2,
@@ -29,9 +29,9 @@ test('product seed contains 81 uniquely named hardware and merchandise products'
     Drinkware: 2,
     Accessories: 1,
     Bags: 2,
-    Home: 3,
+    Home: 10,
     Toys: 2,
-    Pets: 2,
+    Pets: 11,
     Jumpers: 1,
   })
 })
@@ -60,7 +60,7 @@ test('merchandise products use local frontend images with the main image first',
   const merchandise = products.filter((product) => !isHardware(product))
   const allImages = merchandise.flatMap((product) => product.images)
 
-  assert.equal(allImages.length, 53)
+  assert.equal(allImages.length, 83)
   assert.equal(new Set(allImages).size, allImages.length)
   for (const product of merchandise) {
     assert.ok(product.images.length > 0, product.name)

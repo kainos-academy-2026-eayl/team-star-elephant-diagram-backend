@@ -50,10 +50,31 @@ The health check's `time` is the current UTC time in ISO 8601 format.
 
 ## Frontend integration
 
+FinanceManager is read-only and dashboard-only (`finance:view`). `GET /admin`
+returns revenue, total orders and pending orders without sections, quick actions
+or operational rows. Revenue is the all-time value of non-cancelled orders,
+not confirmed payments. Other admin resource permissions are denied for this role.
+
+For roles with `inventory:view`, `GET /admin` also returns `lowStock` with
+`total` and up to five `items`, ordered by quantity then inventory ID. Items
+include inventory ID, product, supplier, quantity and reorder level. A stock
+line is low when `quantity <= reorderLevel`, including zero stock. This data
+is loaded only for authorized roles; other roles receive `lowStock: null`.
+
 Run this API on port `3001` and the sibling frontend on port `3000`.
 Start PostgreSQL with `docker compose up -d`, apply the checked-in migrations
 with `npm run db:deploy`, then start the backend with `npm run dev`.
 The frontend's `.env` needs `API_BASE_URL=http://localhost:3001`.
+
+Successful payment through `POST /orders/from-reservation` creates the processing
+order, updates inventory, and clears the customer's basket in one transaction.
+Failed or expired checkout leaves the basket contents intact.
+
+After pulling Prisma schema changes, run `npm run db:deploy`, then restart the
+backend. `npm run dev` and `npm run build` regenerate Prisma Client first.
+Both the database and generated
+client must include the reservation-allocation and order-item unit-price
+migrations; a stale client or schema can make payment fail to create an order.
 
 The frontend server forwards registration and login as JSON to `POST /register`
 and `POST /login`, and loads products from `GET /products`.
@@ -73,7 +94,7 @@ npm run db:seed
 ```
 
 The seed inserts 51 fictional hardware products across Laptops, Monitors,
-Keyboards, Mice and Headsets, plus 30 team merchandise products across T-Shirts,
+Keyboards, Mice and Headsets, plus 48 team merchandise products across T-Shirts,
 Hats, Scarves, Keyrings, Socks, Sliders, Drinkware, Accessories, Bags, Home, Toys,
 Pets and Jumpers. [prisma/products.ts](prisma/products.ts)
 exports the typed product array.
@@ -84,10 +105,15 @@ same-site paths such as `/images/TeamB-tshirt-front.png`, served by the frontend
 from `src/pages/images`; each product lists all of its views (front, back,
 detail) as gallery images, with the first used as the main image.
 
-Products are matched by name: new products are created with a stock row, and
-existing products with the same name are updated and have their gallery images
-replaced. Products not in the seed are left unchanged. The existing user seed is
-preserved.
+Products are matched by name: new products are created, and existing products
+with the same name are updated and have their gallery images replaced. Products
+not in the seed are left unchanged. The existing user seed is preserved.
+
+The seed also creates the fictional supplier "Elephant Wholesale Ltd"
+([prisma/suppliers.ts](prisma/suppliers.ts)) and links every seeded product to
+it. Any seeded product without an inventory row gets starting stock (quantity
+50, maximum 100, reorder level 10); existing stock levels are never changed, so
+re-running the seed is safe.
 
 ### Seed sample orders
 
@@ -113,6 +139,111 @@ made during testing. It does not delete orders, change inventory or create
 payments. Use this seed only against a development/test database.
 
 Use `npm ci` rather than `npm install`. It installs the exact versions recorded in `package-lock.json`, so everyone on the team runs identical dependencies. Use `npm install` only when you are deliberately adding or upgrading a package.
+
+## Admin inventory (KAN-71)
+
+All `/api/admin/inventory` endpoints require an admin Bearer access JWT and the
+existing KAN-97 `requirePermission('inventory', action)` checks against the
+**current stored** role. There is no separate inventory role allowlist.
+SuperAdmin and InventoryManager have CRUD access; WarehouseStaff may view and
+update; other grants follow the existing permission matrix without duplication.
+The dashboard returns `inventoryPermissions` from that same permission utility
+and `inventorySummary` with separate total, low-stock and out-of-stock product counts.
+It also returns `basketPermissions` (`view/create/update/delete`); SuperAdmin
+and Admin can manage customer baskets, CustomerService can only view them.
+
+| Method | Path | Payload/query |
+| --- | --- | --- |
+| GET | `/api/admin/inventory` | `page=1`, `limit=20` (max 100), `search` (name/SKU), `status`, `sort`, `direction=asc\|desc` |
+| GET | `/api/admin/inventory/suppliers` | Existing supplier IDs/names; requires inventory:create |
+| POST | `/api/admin/inventory` | Product fields, SKU, `stockQuantity`, `lowStockThreshold`, `supplierId`; requires inventory:create |
+| PUT | `/api/admin/inventory/:id` | Editable product fields, absolute `stockQuantity`, `lowStockThreshold`, `reason`; requires inventory:update |
+| DELETE | `/api/admin/inventory/:id` | Requires inventory:delete; referenced products return 409 |
+| GET | `/api/admin/inventory/:id` | Product and latest 20 adjustments |
+| PATCH | `/api/admin/inventory/:id/stock` | `{ "adjustment": -4, "reason": "Damaged", "notes": "Packaging destroyed" }` |
+| PATCH | `/api/admin/inventory/:id/threshold` | `{ "lowStockThreshold": 10 }` |
+| GET | `/api/admin/inventory/:id/history` | `page=1`, `limit=20` (max 100), newest first |
+
+Lists return `{ items, totalItems, totalPages, currentPage }`. Product DTOs retain
+the existing integer `productId` and `modifiedAt` fields (not `id`/`updatedAt`).
+Product fields include name, description, price (decimal pounds), category and
+`imageURL` (HTTP(S) URL or an existing `/images/` path). Sort fields are
+`productId`, `name`, `sku`, `price`, `stockQuantity`, `lowStockThreshold`, and
+`stockStatus`; results have a stable product-ID tie-breaker.
+History includes integer `adjustedById` referencing **AdminUser**, not customer
+User, and an `adjustedBy` object containing the staff ID/forename/surname, along
+with product, delta, before/after stock, reason, notes and timestamp.
+New inventory products require a unique SKU and a real supplier; SKU is immutable
+on update. The existing generic product API retains its generated SKU default.
+Stock and thresholds are nonnegative PostgreSQL integers; adjustments are signed
+integers and reasons are trimmed, 3–255 characters. Unknown body fields are rejected.
+
+The migration backfills product stock from the sum of supplier inventory and
+thresholds from the maximum existing reorder level. Database triggers keep
+product totals/status synchronized on inventory insert/update/delete (including
+checkout, reservation releases and seeds). Zero stock is OUT_OF_STOCK; positive
+stock at or below threshold is LOW_STOCK; otherwise IN_STOCK. Thresholds now
+belong to products. The existing KAN-104 "Low in stock" dashboard panel still uses
+supplier-line reorder levels and supplier names; the new Inventory Management
+card uses product statuses and product thresholds. These are distinct metrics.
+
+Staff adjustments run in a serializable Prisma transaction, locking the product
+and supplier inventory, and always creating an audit record before commit.
+Removal draws from supplier rows in ID order without consuming reserved stock.
+Addition uses the first inventory row, or creates one from an assigned product
+supplier; assign a supplier before adding stock to an unstocked product.
+Checkout/sale changes retain their existing reservation/order records rather than
+being represented as staff adjustments. Serialization/deadlock conflicts are
+retried up to three times. Reads use consistent repeatable-read snapshots.
+
+Responses: 400 invalid input/negative stock/reserved stock/missing supplier,
+401 absent/invalid JWT or deleted staff account, 403 disallowed current role
+(including a valid customer JWT), 404 missing product, 409 exhausted concurrent
+write retries, duplicate SKUs or protected deletions, and 500 unexpected persistence errors. Failures are logged without
+returning internal database details. No staff stock update can commit without its
+audit record. Product creation, initial supplier stock and its audit are atomic;
+edits atomically update metadata, stock, threshold and the primary gallery image.
+Deletion atomically removes the product's supplier stock, supplier links and
+adjustment history. Products referenced by orders, baskets, reservations or
+reserved stock cannot be deleted; a failed deletion rolls back all changes.
+Staff referenced by adjustment history remain protected by audit foreign keys.
+
+Apply with `npm run db:deploy` and regenerate using `npm run db:generate`.
+Existing migration history has duplicate reservation-table creation in
+`20261104110202_add_reservation_tables` and `20261104150000_add_reservation_tables`.
+That pre-existing issue must be resolved separately before replaying all migrations
+on an empty database. The inventory migration was verified against a baseline of
+the preceding schema, including populated supplier inventory, in an isolated
+local database; shared development data was not modified.
+Database integration tests require a **dedicated local** migrated database:
+
+```sh
+INVENTORY_TEST_DATABASE_URL=postgresql://dev:dev@localhost:5432/inventory_test_kan71 npm test
+```
+
+The integration test only deletes its own fixtures. Never use a shared database.
+
+### Existing development database integration
+
+Do not reset or reseed a populated database to enable inventory. Apply the
+prerequisite reservation, reserved-stock, shipping-fee, allocation and order-item
+price migrations before `20261105140000_admin_inventory`. The inventory migration
+backfills totals and thresholds from existing supplier stock; it does not replace
+customers or products.
+
+For the known duplicate reservation migration only: after verifying that
+`20261104110202_add_reservation_tables` has already created the same tables and
+foreign keys, mark `20261104150000_add_reservation_tables` applied with
+`npx prisma migrate resolve --applied 20261104150000_add_reservation_tables`
+instead of executing its duplicate CREATE statements. Do not mark unrelated
+pending migrations applied. Older development databases can also contain
+historical migration names absent from this repository; preserve that history.
+Database contents, backups and local test-account credentials must not be committed.
+
+KAN-104's existing low-stock DTO/query is retained in
+`src/repositories/adminRepository.ts`, `src/services/AdminUserService.ts` and
+`src/models/AdminUser.ts`; keep both its supplier-line fields and KAN-71's new
+product counts/permission fields when integrating that backend branch.
 
 ## Authentication
 
@@ -182,7 +313,7 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | Backend endpoint | Behavior |
 | --- | --- |
 | `POST /login` | Customer JSON credentials; returns `accessToken`, `expiresIn: 900`, and legacy `token` alias. |
-| `POST /admin/login` | Admin JSON credentials; returns `accessToken`, `expiresIn: 900`, and public admin details. |
+| `POST /admin/login` | Admin JSON credentials (`email`, `password`); returns `accessToken`, `expiresIn: 900`, and public admin details. Unknown email or incorrect password returns 401 with `Invalid email or password`. |
 | `POST /auth/refresh` | Exchanges the refresh cookie for a new access token and rotates the cookie. |
 | `POST /auth/logout` | Revokes the refresh session and expires the refresh cookie. |
 | `POST /forgot-password` | Accepts JSON `email`; requests a local reset link without revealing account existence. |
@@ -194,9 +325,24 @@ seven-day lifetime from login**. Refreshing does not extend that lifetime.
 | `GET /admin/users/:id` | Admin only. Customer summary, 5 most recent orders, and the customer's current basket summary. |
 | `POST /admin/users/:id/suspend` | Admin only. Sets the customer to `suspended`; suspended customers get the normal invalid-credentials response at `POST /login`. |
 | `POST /admin/users/:id/reactivate` | Admin only. Sets the customer back to `active`. |
+| `POST /admin/users/:id/delete` | Requires `users:delete` (Admin or SuperAdmin). Permanently removes the customer, order items, orders, payment details, basket/items and customer refresh sessions in one transaction. Returns `{ deleted: true }`, or 404 if absent. Irreversible; no schema migration needed. |
 | `GET /admin/baskets?search=&page=` | Admin only. Lists customer baskets (20 per page), most recent activity first; `search` (or `q`) matches basket ID, customer name or email, case-insensitive. |
-| `GET /admin/baskets/:id` | Admin only. Basket details with customer, priced items and total; 404 for unknown IDs. |
+| `GET /admin/baskets/:id` | Admin only. Basket details with customer (including `id`), priced items and total; each item includes live `availableStock`, `maxQuantity` and `exceedsStock`. `products` lists in-stock products not yet in the basket. 404 for unknown IDs. |
+| `POST /admin/baskets` | Requires `baskets:create`. Body `{ email }`. Creates an empty basket for that customer: 201 `{ basketId }`; 404 unknown customer; 409 `{ code: 'exists', basketId }` if they already have one. |
+| `POST /admin/baskets/:id/items` | Requires `baskets:update`. Body `{ productId, quantity }`. Adds to the line, capped at available stock (inventory minus reservations) and 99; 409 `{ code: 'stock' }` when exceeded. Returns updated basket details. |
+| `PATCH /admin/baskets/:id/items/:productId` | Requires `baskets:update`. Body `{ quantity }` (1–99, ≤ available stock). Returns updated basket details; 404 if the product is not in the basket. |
+| `DELETE /admin/baskets/:id/items/:productId` | Requires `baskets:update`. Removes one line. Returns updated basket details. |
+| `DELETE /admin/baskets/:id/items` | Requires `baskets:update`. Empties the basket but keeps it. Returns updated basket details. |
+| `DELETE /admin/baskets/:id` | Requires `baskets:delete`. Deletes the basket and its items; `{ deleted: true }` or 404. |
 | `POST /admin/products` | Requires `inventory:create` (SuperAdmin, InventoryManager). JSON `imageURL` (http/https URL, ≤255), `name` (≤100), `description` (≤255), `category` (≤100), `price` (> 0, ≤ 99,999,999.99, max 2 decimals; number or numeric string). Returns 201 with the product and a `Location` header; 400 with field `details` on validation failure, 401 unauthenticated, 403 for other roles. |
+
+Unimplemented admin-account and permission-management dashboard controls are
+omitted. Customer deletion leaves products and staff accounts/sessions unchanged.
+For the optional PostgreSQL deletion/rollback integration test, set
+`USER_DELETION_TEST_DATABASE_URL` to a migrated, dedicated local
+`user_deletion_test_*` database and run
+`node --import tsx --test test/userDeletionDatabase.test.mjs`. Never use a
+development or production database for this test.
 
 `POST /admin/logout` remains a compatibility alias. The refresh endpoint is
 `/auth/refresh`, not `/admin/refresh`. Customer order history is not implemented;

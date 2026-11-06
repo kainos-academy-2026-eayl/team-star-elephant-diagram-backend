@@ -5,6 +5,7 @@ import { ARGON2_OPTIONS } from '../src/services/userService';
 import { products } from './products';
 import { adminUsers } from './adminUsers';
 import { seedOrders } from './orders';
+import { seedStock, seedSupplier } from './suppliers';
 
 const prisma = new PrismaClient();
 
@@ -240,23 +241,35 @@ async function main() {
         console.log(`${updatedPasswordCount} customer passwords initialized`);
     }
 
-    const supplier = await prisma.supplier.findFirst();
+    const { supplierId } = await prisma.supplier.upsert({
+        where: { name: seedSupplier.name },
+        create: seedSupplier,
+        update: {},
+    });
     let createdProducts = 0;
+    let stockedProducts = 0;
 
     for (const { images = [], ...product } of products) {
         const existing = await prisma.product.findFirst({ where: { name: product.name } });
         const productId = existing
             ? (await prisma.product.update({ where: { productId: existing.productId }, data: product })).productId
             : (await prisma.product.create({ data: product })).productId;
-            
         if (!existing) {
             createdProducts++;
-            // Without an inventory row the product shows as out of stock.
-            if (supplier) {
-                await prisma.inventory.create({
-                    data: { productId, supplierId: supplier.supplierId, quantity: 20, marketValue: product.price },
-                });
-            }
+        }
+
+        await prisma.productSupplier.upsert({
+            where: { productId_supplierId: { productId, supplierId } },
+            create: { productId, supplierId },
+            update: {},
+        });
+
+        // Without an inventory row the product shows as out of stock; existing stock levels are never overwritten.
+        if (!(await prisma.inventory.findFirst({ where: { productId } }))) {
+            await prisma.inventory.create({
+                data: { productId, supplierId, ...seedStock, marketValue: product.price },
+            });
+            stockedProducts++;
         }
 
         await prisma.productImage.deleteMany({ where: { productId } });
@@ -268,6 +281,7 @@ async function main() {
     }
 
     console.log(`${createdProducts} new products seeded`);
+    console.log(`${stockedProducts} products given starting stock from ${seedSupplier.name}`);
 
     const createdOrders = await seedOrders(prisma);
     console.log(`${createdOrders} new sample orders seeded (with order items)`);
