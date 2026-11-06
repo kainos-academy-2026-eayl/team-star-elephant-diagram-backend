@@ -55,6 +55,16 @@ Start PostgreSQL with `docker compose up -d`, apply the checked-in migrations
 with `npm run db:deploy`, then start the backend with `npm run dev`.
 The frontend's `.env` needs `API_BASE_URL=http://localhost:3001`.
 
+Successful payment through `POST /orders/from-reservation` creates the processing
+order, updates inventory, and clears the customer's basket in one transaction.
+Failed or expired checkout leaves the basket contents intact.
+
+After pulling Prisma schema changes, run `npm run db:deploy`, then restart the
+backend. `npm run dev` and `npm run build` regenerate Prisma Client first.
+Both the database and generated
+client must include the reservation-allocation and order-item unit-price
+migrations; a stale client or schema can make payment fail to create an order.
+
 The frontend server forwards registration and login as JSON to `POST /register`
 and `POST /login`, and loads products from `GET /products`.
 The catalogue reads the Prisma `Product` table; an empty table returns `[]`.
