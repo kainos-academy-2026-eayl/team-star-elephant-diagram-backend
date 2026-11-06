@@ -181,8 +181,11 @@ export const prismaAdminUserRepository: adminRepository = {
 			prisma.inventory.findMany({
 				where: { quantity: { lte: prisma.inventory.fields.reorderLevel } },
 				select: {
-					inventoryId: true, quantity: true, reorderLevel: true,
-					product: { select: { name: true } }, supplier: { select: { name: true } },
+					inventoryId: true,
+					quantity: true,
+					reorderLevel: true,
+					product: { select: { name: true } },
+					supplier: { select: { name: true } },
 				},
 				orderBy: [{ quantity: 'asc' }, { inventoryId: 'asc' }],
 				take: DASHBOARD_RECENT_ROWS,
@@ -196,8 +199,11 @@ export const prismaAdminUserRepository: adminRepository = {
 			unitsInStock: stock._sum.quantity ?? 0,
 			lowStockLines,
 			lowStockItems: lowStock.map((row) => ({
-				inventoryId: row.inventoryId, product: row.product.name, supplier: row.supplier.name,
-				quantity: row.quantity, reorderLevel: row.reorderLevel,
+				inventoryId: row.inventoryId,
+				product: row.product.name,
+				supplier: row.supplier.name,
+				quantity: row.quantity,
+				reorderLevel: row.reorderLevel,
 			})),
 			recentStockChanges: recent.map((row) => ({
 				product: row.product.name,

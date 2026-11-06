@@ -1,6 +1,7 @@
 import { Router, type ErrorRequestHandler, type RequestHandler } from 'express';
 import { z } from 'zod';
 import { InventoryController } from '../controllers/inventoryController';
+import { createAuthRateLimiter, rateLimitMax } from '../middleware/authRateLimiter';
 import { requireAdmin, requirePermission } from '../middleware/requireAdmin';
 import type { AdminUserService } from '../services/AdminUserService';
 import { InventoryError, type InventoryService } from '../services/inventoryService';
@@ -48,6 +49,7 @@ export const inventoryErrorHandler: ErrorRequestHandler = (error: unknown, _req,
 export function createInventoryRouter(service: InventoryService, admins: AdminUserService, tokens: TokenService) {
 	const router = Router();
 	const controller = new InventoryController(service);
+	router.use(createAuthRateLimiter({ limit: rateLimitMax(100) }));
 	// A valid customer JWT is authenticated but never authorised for the admin inventory API.
 	router.use(async (req, res, next) => {
 		const header = req.headers.authorization ?? '';

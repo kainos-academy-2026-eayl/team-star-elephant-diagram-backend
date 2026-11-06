@@ -252,7 +252,7 @@ model Reservation {
   userId         Int
   user           User              @relation(fields: [userId], references: [userId], onDelete: Cascade)
   items          ReservationItem[]
- 
+
   status         ReservationStatus @default(ACTIVE)
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
@@ -262,7 +262,7 @@ model Reservation {
   order          Order?            @relation(fields: [orderId], references: [orderId], onDelete: SetNull)
 
   @@index([expiresAt])
-  
+
   @@index([status, expiresAt])
   @@index([userId, status])
 }
