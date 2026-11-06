@@ -26,23 +26,33 @@ export class BasketService {
         private readonly baskets: BasketRepository,
     ) { }
 
-    async addItem(userId: number, productId: number, quantity: number): Promise<Basket> {
+    // maxQuantity lets admin callers cap the line at available stock; it can never exceed MAX_ITEM_QUANTITY.
+    async addItem(userId: number, productId: number, quantity: number, maxQuantity = MAX_ITEM_QUANTITY): Promise<Basket> {
         const product = await this.products.findById(productId);
         if (!product) {
             throw new ProductNotFoundError(productId);
         }
 
-        const quantityAdded = await this.baskets.addQuantity(String(userId), productId, quantity, MAX_ITEM_QUANTITY);
+        const limit = Math.min(maxQuantity, MAX_ITEM_QUANTITY);
+        const quantityAdded = await this.baskets.addQuantity(String(userId), productId, quantity, limit);
         if (!quantityAdded) {
-            throw new BasketQuantityError(`Quantity cannot exceed ${MAX_ITEM_QUANTITY}`);
+            throw new BasketQuantityError(`Quantity cannot exceed ${limit}`);
         }
 
         return this.getBasket(userId);
     }
 
-    async updateItemQuantity(userId: number, productId: number, quantity: number): Promise<Basket> {
-        if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_ITEM_QUANTITY) {
-            throw new BasketQuantityError(`Quantity must be between 1 and ${MAX_ITEM_QUANTITY}`);
+    async updateItemQuantity(
+        userId: number,
+        productId: number,
+        quantity: number,
+        maxQuantity = MAX_ITEM_QUANTITY,
+    ): Promise<Basket> {
+        const limit = Math.min(maxQuantity, MAX_ITEM_QUANTITY);
+        if (!Number.isInteger(quantity) || quantity < 1 || quantity > limit) {
+            throw new BasketQuantityError(
+                limit < 1 ? 'This product is out of stock' : `Quantity must be between 1 and ${limit}`,
+            );
         }
         if (!(await this.baskets.setQuantity(String(userId), productId, quantity))) {
             throw new BasketItemNotFoundError(productId);
@@ -55,6 +65,18 @@ export class BasketService {
             throw new BasketItemNotFoundError(productId);
         }
         return this.getBasket(userId);
+    }
+
+    async createBasket(userId: number): Promise<{ basketId: number; created: boolean }> {
+        return this.baskets.createForUser(userId);
+    }
+
+    async clearBasket(basketId: number): Promise<boolean> {
+        return this.baskets.clear(basketId);
+    }
+
+    async deleteBasket(basketId: number): Promise<boolean> {
+        return this.baskets.delete(basketId);
     }
 
     async getBasket(userId: number): Promise<Basket> {

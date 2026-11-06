@@ -1,4 +1,4 @@
-export const ADMIN_ROLES = ['SuperAdmin', 'Admin', 'InventoryManager', 'FinanceManager', 'CustomerService'] as const;
+export const ADMIN_ROLES = ['SuperAdmin', 'Admin', 'InventoryManager', 'WarehouseStaff', 'FinanceManager', 'CustomerService'] as const;
 
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
@@ -7,6 +7,7 @@ export const DASHBOARD_BY_ROLE: Record<AdminRole, string> = {
     SuperAdmin: 'super-admin',
     Admin: 'admin',
     InventoryManager: 'inventory',
+    WarehouseStaff: 'inventory',
     FinanceManager: 'finance',
     CustomerService: 'customer-service',
 };
@@ -18,7 +19,7 @@ export function isAdminRole(role: string): role is AdminRole {
 // Actions that can be granted on each admin portal resource.
 export const ADMIN_RESOURCE_ACTIONS = {
     users: ['view', 'create', 'update', 'delete', 'suspend', 'reactivate'],
-    baskets: ['view'],
+    baskets: ['view', 'create', 'update', 'delete'],
     orders: ['view', 'create', 'update', 'delete'],
     inventory: ['view', 'create', 'update', 'delete'],
     finance: ['view', 'create', 'update', 'delete'],
@@ -34,8 +35,8 @@ export type ResourcePermissions = { readonly [R in AdminResource]?: readonly Adm
 // Role -> Resource -> Action. Unlisted resources/actions are denied. SuperAdmin bypasses this table.
 export const ROLE_PERMISSIONS: Readonly<Record<Exclude<AdminRole, 'SuperAdmin'>, ResourcePermissions>> = {
     Admin: {
-        users: ['view', 'suspend', 'reactivate'],
-        baskets: ['view'],
+        users: ['view', 'delete', 'suspend', 'reactivate'],
+        baskets: ['view', 'create', 'update', 'delete'],
         orders: ['view', 'update'],
         inventory: ['view'],
         finance: ['view'],
@@ -50,10 +51,11 @@ export const ROLE_PERMISSIONS: Readonly<Record<Exclude<AdminRole, 'SuperAdmin'>,
         inventory: ['view', 'create', 'update', 'delete'],
         orders: ['view'],
     },
+    WarehouseStaff: {
+        inventory: ['view', 'update'],
+    },
     FinanceManager: {
-        finance: ['view', 'update'],
-        orders: ['view'],
-        inventory: ['view'],
+        finance: ['view'],
     },
 };
 

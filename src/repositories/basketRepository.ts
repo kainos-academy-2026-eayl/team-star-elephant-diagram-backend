@@ -24,6 +24,11 @@ export interface BasketRepository {
     removeItem(basketId: string, productId: number): Promise<boolean>;
     list(search: string | undefined, skip: number, take: number): Promise<BasketListResult>;
     findByBasketId(basketId: number): Promise<BasketRecord | null>;
+    // Returns the existing basket ID with created=false when the customer already has one.
+    createForUser(userId: number): Promise<{ basketId: number; created: boolean }>;
+    // Both return false when the basket does not exist.
+    clear(basketId: number): Promise<boolean>;
+    delete(basketId: number): Promise<boolean>;
 }
 
 const basketRecordInclude = {
@@ -82,6 +87,34 @@ export function createDatabaseBasketRepository(prisma: PrismaClient): BasketRepo
         async findByBasketId(basketId) {
             const row = await prisma.basket.findUnique({ where: { basketId }, include: basketRecordInclude });
             return row ? toBasketRecord(row) : null;
+        },
+
+        async createForUser(userId) {
+            const existing = await prisma.basket.findUnique({ where: { userId }, select: { basketId: true } });
+            if (existing) return { basketId: existing.basketId, created: false };
+            try {
+                const basket = await prisma.basket.create({ data: { userId }, select: { basketId: true } });
+                return { basketId: basket.basketId, created: true };
+            } catch (error) {
+                // Lost a race with a concurrent create; report the winner's basket.
+                const raced = await prisma.basket.findUnique({ where: { userId }, select: { basketId: true } });
+                if (raced) return { basketId: raced.basketId, created: false };
+                throw error;
+            }
+        },
+
+        async clear(basketId) {
+            return prisma.$transaction(async (tx) => {
+                const { count } = await tx.basket.updateMany({ where: { basketId }, data: { updatedAt: new Date() } });
+                if (count === 0) return false;
+                await tx.basketItem.deleteMany({ where: { basketId } });
+                return true;
+            });
+        },
+
+        async delete(basketId) {
+            const { count } = await prisma.basket.deleteMany({ where: { basketId } });
+            return count > 0;
         },
 
         async getItems(basketId) {
