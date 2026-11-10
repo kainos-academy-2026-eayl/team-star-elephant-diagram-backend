@@ -50,11 +50,11 @@ The health check's `time` is the current UTC time in ISO 8601 format.
 
 ## Docker
 
-From this backend directory, build [teamSED.dockerfile](teamSED.dockerfile):
+From this backend directory, build the [Dockerfile](Dockerfile):
 
 ```sh
 docker build --build-context certificates="$HOME/certificates" \
-  -f teamSED.dockerfile -t elephant-backend .
+  -f Dockerfile -t elephant-backend .
 ```
 
 The certificate context must contain `KAINOS-ZSCALER G2_2027.pem`, the approved
@@ -71,9 +71,14 @@ The application runs as the non-root `node` user.
 Supply configuration at runtime; `.env` files are excluded from the build:
 
 ```sh
-docker run --rm --name elephant-backend --env-file .env \
-  -e NODE_ENV=production -e PORT=3001 -p 3001:3001 elephant-backend
+docker run --rm -p 3001:3001 --env-file .env elephant-backend
 ```
+
+The image sets `NODE_ENV=production` and `PORT=3001`. Values in `.env` override
+them, so remove or change `NODE_ENV=development` there, or add
+`-e NODE_ENV=production` after `--env-file`. Without `--env-file`, startup fails
+with `JWT_SECRET, ADMIN_ACCESS_TOKEN_SECRET and ADMIN_REFRESH_TOKEN_SECRET must
+be set`.
 
 Docker env files require literal `KEY=value` entries: do not surround values
 with quotes or use `${VARIABLE}` interpolation. Provide `DATABASE_URL`,
@@ -88,7 +93,7 @@ run it against the intended database before starting the application:
 
 ```sh
 docker build --build-context certificates="$HOME/certificates" \
-  --target migrations -f teamSED.dockerfile -t elephant-backend-migrations .
+  --target migrations -f Dockerfile -t elephant-backend-migrations .
 docker run --rm --env-file .env elephant-backend-migrations
 ```
 
