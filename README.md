@@ -48,6 +48,82 @@ curl http://localhost:3001/
 
 The health check's `time` is the current UTC time in ISO 8601 format.
 
+## Run the backend in Docker
+
+The [Dockerfile](Dockerfile) builds the backend separately from PostgreSQL:
+
+1. `FROM node:22-alpine` supplies the project's Node.js 22 runtime.
+2. `WORKDIR /app` creates and selects the application directory inside the image.
+3. `RUN apk add --no-cache ca-certificates openssl libstdc++` supplies trusted
+   certificates and system libraries for Prisma and native dependencies on Alpine.
+   The optional `corporate_ca` build secret installs your approved corporate CA
+   into the image's trust store. `NODE_EXTRA_CA_CERTS` makes Node.js, including
+   Prisma's downloader, trust that store alongside its built-in certificates.
+4. Copying the dependency manifests and Prisma schema before `npm ci` lets Docker
+   reuse the dependency layer when only application code changes. The schema must
+   be available because the installation hook generates Prisma Client.
+5. `COPY . .` copies the remaining application files, then `npm run build`
+   generates Prisma Client, checks types, and compiles the backend.
+6. `ENV PORT=3001` sets the default listening port. `EXPOSE 3001` documents it;
+   the `-p` option below actually publishes it.
+7. `CMD ["npm", "start"]` runs the compiled HTTP server when the container starts.
+
+The [.dockerignore](.dockerignore) excludes local dependencies, previous builds,
+Git history, and local environment files. Supply secrets at runtime, not in the
+image.
+
+From the backend directory, with Docker running:
+
+```sh
+docker build -t elephant-backend .
+docker compose up -d db
+```
+
+On the Kainos network, pass your certificate using a BuildKit secret:
+
+```sh
+docker build \
+  --secret "id=corporate_ca,src=/Users/rosemaryaby/certificates/KAINOS-ZSCALER G2_2027.pem" \
+  -t elephant-backend .
+```
+
+Docker cannot directly copy an absolute host path outside the build context.
+The secret passes the file without adding it to the repository; the Dockerfile
+deliberately installs this CA certificate (not a private key) into the image so
+HTTPS connections also trust it at runtime. Other developers should substitute
+their approved certificate path. When changing the certificate, add `--no-cache`
+to rebuild the trust store, since secret contents do not invalidate Docker's cache.
+
+Configure `.env` as described in Quick start and Authentication, then apply
+migrations to the local database with `npm run db:deploy`. On Docker Desktop,
+run the backend with the database URL pointing to the host's published PostgreSQL
+port:
+
+```sh
+docker run --rm --name elephant-backend \
+  -p 3001:3001 \
+  --env-file .env \
+  -e DATABASE_URL='postgresql://dev:dev@host.docker.internal:5432/app_dev?schema=public' \
+  elephant-backend
+```
+
+The example URL matches the Compose database defaults; adjust the credentials,
+port, and database name if you changed them. Inside the backend container,
+`localhost` means that container, not your Mac or the database container.
+Stop any locally running backend first to free port 3001.
+
+In another terminal, check `curl http://localhost:3001/health`.
+The image does not automatically apply migrations or seed the database.
+It retains build dependencies for simplicity; a production deployment can use
+a separate runtime stage to reduce image size.
+
+If Prisma's download fails during the build with `unable to get local issuer
+certificate`, the container cannot verify the download server's certificate
+chain. On a network that inspects HTTPS, obtain the approved CA certificate and
+pass it using the `corporate_ca` build secret above. If verification still fails,
+ask your administrator for the complete approved CA chain. Do not disable TLS
+certificate verification.
+
 ## Frontend integration
 
 FinanceManager is read-only and dashboard-only (`finance:view`). `GET /admin`
