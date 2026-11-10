@@ -1,23 +1,54 @@
-# 1. Base image
-FROM node:22-alpine
+# syntax=docker/dockerfile:1
 
-# 2. Working directory
+# Build workshop stage
+FROM node:22-bookworm AS build
+
 WORKDIR /app
 
-# 3. TODO: Copy package files (+ prisma folder) and install dependencies
-COPY package.json package-lock.json .npmrc ./
-COPY prisma ./prisma
-RUN --mount=type=secret,id=company_ca,required=true \
-    NODE_EXTRA_CA_CERTS=/run/secrets/company_ca npm ci
-# 4. TODO: Copy the rest of the app code
-COPY . . 
-RUN --mount=type=secret,id=company_ca,required=true \
-    NODE_EXTRA_CA_CERTS=/run/secrets/company_ca npm run build
-# 5. TODO: Build TypeScript -> dist/
+COPY package*.json ./
+COPY prisma ./prisma/
+COPY --from=certificates ["KAINOS-ZSCALER G2_2027.pem", "/usr/local/share/ca-certificates/company-ca.crt"]
+RUN update-ca-certificates
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/company-ca.crt
 
-# 6. TODO: Expose the port
+RUN --mount=type=cache,target=/root/.npm npm ci
+
+COPY . .
+RUN npm run build
+
+# Database migrations stage
+FROM build AS migrations
+
+USER node
+
+CMD ["npm", "run", "db:deploy"]
+
+# Node dependencies (modules) stage
+FROM build AS production-dependencies
+
+RUN npm prune --omit=dev --omit=optional --ignore-scripts
+
+# Runtime stage
+FROM node:22-bookworm-slim AS runtime
+
+WORKDIR /app
+
+COPY --from=certificates ["KAINOS-ZSCALER G2_2027.pem", "/usr/local/share/ca-certificates/company-ca.crt"]
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && update-ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/company-ca.crt
+ENV NODE_ENV=development
 ENV PORT=3001
+
+COPY --from=build /app/package.json ./
+COPY --from=build /app/dist ./dist
+COPY --from=production-dependencies /app/node_modules ./node_modules
+
+USER node
+
 EXPOSE 3001
 
-# 7. TODO: Start command
-CMD ["npm", "run", "start"]
+CMD ["node", "dist/index.js"]

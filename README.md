@@ -48,28 +48,67 @@ curl http://localhost:3001/
 
 The health check's `time` is the current UTC time in ISO 8601 format.
 
-## Docker build behind the company proxy
+## Docker
 
-The [Dockerfile](./Dockerfile) requires the company public CA certificate as a
-BuildKit secret so Node can verify HTTPS downloads during installation and
-compilation. From this backend directory, run:
+From this backend directory, build the [Dockerfile](Dockerfile):
 
 ```sh
-docker build \
-  --secret "id=company_ca,src=/absolute/path/to/company-ca.pem" \
-  -t elephant-backend-learning:check .
+docker build --build-context certificates="$HOME/certificates" \
+  -f Dockerfile -t elephant-backend .
 ```
 
-Replace the certificate path with your local PEM certificate path. Use only a
-public CA certificate, never a private key. The certificate is mounted temporarily
-during build commands and is not stored in the image. TLS verification remains
-enabled.
+The certificate context must contain `KAINOS-ZSCALER G2_2027.pem`, the approved
+company CA certificate (no private key). It is trusted during the build and
+at runtime without copying it into the repository.
 
-The image defaults to port `3001`. At runtime, provide `DATABASE_URL`,
-`JWT_SECRET`, `ADMIN_ACCESS_TOKEN_SECRET`, and `ADMIN_REFRESH_TOKEN_SECRET`.
-Publish the container port with `-p 127.0.0.1:3001:3001`. The database must be
-reachable from inside the container; `localhost` refers to the container itself.
-The `/health` endpoint checks HTTP availability, not database connectivity.
+The multi-stage build uses Node.js 22 on Debian Bookworm for both compilation
+and the slim runtime. Only compiled code, package metadata and production
+dependencies, including the generated Prisma Client, enter the runtime image.
+Development and optional dependencies are pruned after generation so Prisma
+Client's optional Prisma CLI and TypeScript peers do not enter the runtime.
+The application runs as the non-root `node` user.
+
+Supply configuration at runtime; `.env` files are excluded from the build:
+
+```sh
+docker run --rm -p 3001:3001 --env-file .env elephant-backend
+```
+
+The image sets `NODE_ENV=production` and `PORT=3001`. Values in `.env` override
+them, so remove or change `NODE_ENV=development` there, or add
+`-e NODE_ENV=production` after `--env-file`. Without `--env-file`, startup fails
+with `JWT_SECRET, ADMIN_ACCESS_TOKEN_SECRET and ADMIN_REFRESH_TOKEN_SECRET must
+be set`.
+
+Docker env files require literal `KEY=value` entries: do not surround values
+with quotes or use `${VARIABLE}` interpolation. Provide `DATABASE_URL`,
+`JWT_SECRET`, `ADMIN_ACCESS_TOKEN_SECRET` and `ADMIN_REFRESH_TOKEN_SECRET`.
+For PostgreSQL exposed on the Mac host, use `host.docker.internal` and the
+published database port in `DATABASE_URL`, not `localhost`. For PostgreSQL on
+a shared Docker network, use its service name and attach the backend to that
+network with `--network`.
+
+The runtime excludes the Prisma CLI. Build the separate migration target and
+run it against the intended database before starting the application:
+
+```sh
+docker build --build-context certificates="$HOME/certificates" \
+  --target migrations -f Dockerfile -t elephant-backend-migrations .
+docker run --rm --env-file .env elephant-backend-migrations
+```
+
+Migration execution changes the configured database; confirm `DATABASE_URL`
+first. Add `--network` to the migration command too if using a Docker network.
+Migrations and seeding are not performed during image builds or application
+startup.
+
+Fresh-database validation currently fails at migration
+`20261104150000_add_reservation_tables` with `relation "Reservation" already
+exists`. Resolve the migration-history issue with the team before deploying
+to a fresh database; the Docker image does not repair or bypass migrations.
+
+Check HTTP connectivity with `curl http://localhost:3001/health`. This endpoint
+does not check database connectivity.
 
 ## Frontend integration
 
