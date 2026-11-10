@@ -48,6 +48,63 @@ curl http://localhost:3001/
 
 The health check's `time` is the current UTC time in ISO 8601 format.
 
+## Docker
+
+From this backend directory, build [teamSED.dockerfile](teamSED.dockerfile):
+
+```sh
+docker build --build-context certificates="$HOME/certificates" \
+  -f teamSED.dockerfile -t elephant-backend .
+```
+
+The certificate context must contain `KAINOS-ZSCALER G2_2027.pem`, the approved
+company CA certificate (no private key). It is trusted during the build and
+at runtime without copying it into the repository.
+
+The multi-stage build uses Node.js 22 on Debian Bookworm for both compilation
+and the slim runtime. Only compiled code, package metadata and production
+dependencies, including the generated Prisma Client, enter the runtime image.
+Development and optional dependencies are pruned after generation so Prisma
+Client's optional Prisma CLI and TypeScript peers do not enter the runtime.
+The application runs as the non-root `node` user.
+
+Supply configuration at runtime; `.env` files are excluded from the build:
+
+```sh
+docker run --rm --name elephant-backend --env-file .env \
+  -e NODE_ENV=production -e PORT=3001 -p 3001:3001 elephant-backend
+```
+
+Docker env files require literal `KEY=value` entries: do not surround values
+with quotes or use `${VARIABLE}` interpolation. Provide `DATABASE_URL`,
+`JWT_SECRET`, `ADMIN_ACCESS_TOKEN_SECRET` and `ADMIN_REFRESH_TOKEN_SECRET`.
+For PostgreSQL exposed on the Mac host, use `host.docker.internal` and the
+published database port in `DATABASE_URL`, not `localhost`. For PostgreSQL on
+a shared Docker network, use its service name and attach the backend to that
+network with `--network`.
+
+The runtime excludes the Prisma CLI. Build the separate migration target and
+run it against the intended database before starting the application:
+
+```sh
+docker build --build-context certificates="$HOME/certificates" \
+  --target migrations -f teamSED.dockerfile -t elephant-backend-migrations .
+docker run --rm --env-file .env elephant-backend-migrations
+```
+
+Migration execution changes the configured database; confirm `DATABASE_URL`
+first. Add `--network` to the migration command too if using a Docker network.
+Migrations and seeding are not performed during image builds or application
+startup.
+
+Fresh-database validation currently fails at migration
+`20261104150000_add_reservation_tables` with `relation "Reservation" already
+exists`. Resolve the migration-history issue with the team before deploying
+to a fresh database; the Docker image does not repair or bypass migrations.
+
+Check HTTP connectivity with `curl http://localhost:3001/health`. This endpoint
+does not check database connectivity.
+
 ## Frontend integration
 
 FinanceManager is read-only and dashboard-only (`finance:view`). `GET /admin`
