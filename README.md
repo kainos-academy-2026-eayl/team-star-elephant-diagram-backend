@@ -48,6 +48,29 @@ curl http://localhost:3001/
 
 The health check's `time` is the current UTC time in ISO 8601 format.
 
+## Docker build behind the company proxy
+
+The [Dockerfile](./Dockerfile) requires the company public CA certificate as a
+BuildKit secret so Node can verify HTTPS downloads during installation and
+compilation. From this backend directory, run:
+
+```sh
+docker build \
+  --secret "id=company_ca,src=/absolute/path/to/company-ca.pem" \
+  -t elephant-backend-learning:check .
+```
+
+Replace the certificate path with your local PEM certificate path. Use only a
+public CA certificate, never a private key. The certificate is mounted temporarily
+during build commands and is not stored in the image. TLS verification remains
+enabled.
+
+The image defaults to port `3001`. At runtime, provide `DATABASE_URL`,
+`JWT_SECRET`, `ADMIN_ACCESS_TOKEN_SECRET`, and `ADMIN_REFRESH_TOKEN_SECRET`.
+Publish the container port with `-p 127.0.0.1:3001:3001`. The database must be
+reachable from inside the container; `localhost` refers to the container itself.
+The `/health` endpoint checks HTTP availability, not database connectivity.
+
 ## Frontend integration
 
 FinanceManager is read-only and dashboard-only (`finance:view`). `GET /admin`
