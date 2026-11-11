@@ -40,7 +40,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/company-ca.crt
-ENV NODE_ENV=development
+ENV NODE_ENV=production
 ENV PORT=3001
 
 COPY --from=build /app/package.json ./
