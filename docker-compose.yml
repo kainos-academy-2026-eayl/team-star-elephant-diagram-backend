@@ -1,7 +1,26 @@
-# Local development Postgres database
-# Start:  docker compose up -d
-# Stop:   docker compose down
-# Reset:  docker compose down -v   (deletes all data!)
+# Full local stack: Postgres + backend API + frontend
+# Configuration comes from ./.env (Compose reads it automatically).
+#
+# Start:    docker compose up -d --build
+# Stop:     docker compose down
+# Reset:    docker compose down -v   (deletes all data!)
+# Migrate:  runs automatically via the "migrate" service before the backend starts
+#
+# Inside the Compose network the services reach each other by service name
+# (db, backend, frontend), so DATABASE_URL and API_BASE_URL are built here and
+# any values for them in .env are ignored.
+#
+# The company CA certificate directory is passed to the backend build as the
+# "certificates" build context (default: ~/certificates). Override with
+# CERTIFICATES_DIR in .env.
+
+x-backend-build: &backend-build
+  context: .
+  additional_contexts:
+    certificates: ${CERTIFICATES_DIR:-${HOME}/certificates}
+
+x-database-url: &database-url
+  DATABASE_URL: postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@db:5432/${POSTGRES_DB:-app_dev}
 
 services:
   db:
@@ -24,6 +43,66 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  migrate:
+    build:
+      <<: *backend-build
+      target: migrations
+    image: team-star-elephant-migrate
+    container_name: local-migrate
+    restart: "no"
+    environment:
+      <<: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend:
+    build: *backend-build
+    image: team-star-elephant-backend
+    container_name: local-backend
+    restart: unless-stopped
+    environment:
+      <<: *database-url
+      PORT: ${PORT:-3001}
+      NODE_ENV: ${NODE_ENV:-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      ADMIN_ACCESS_TOKEN_SECRET: ${ADMIN_ACCESS_TOKEN_SECRET:?ADMIN_ACCESS_TOKEN_SECRET must be set in .env}
+      ADMIN_REFRESH_TOKEN_SECRET: ${ADMIN_REFRESH_TOKEN_SECRET:?ADMIN_REFRESH_TOKEN_SECRET must be set in .env}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-}
+      PASSWORD_RESET_DELIVERY: ${PASSWORD_RESET_DELIVERY:-}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-https://localhost:3000}
+      TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-}
+    ports:
+      - "${PORT:-3001}:${PORT:-3001}"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build: ../team-star-elephant-diagram-frontend
+    image: team-star-elephant-frontend
+    container_name: local-frontend
+    restart: unless-stopped
+    environment:
+      # Server-side calls to the API use the Compose network, not localhost
+      API_BASE_URL: http://backend:${PORT:-3001}
+      PORT: ${FRONTEND_PORT:-3000}
+      NODE_ENV: ${NODE_ENV:-production}
+      TRUSTED_PROXY: ${TRUSTED_PROXY:-}
+      # Serve HTTPS with the frontend's local dev certs (matches the
+      # https://localhost:3000 FRONTEND_BASE_URL). Set FRONTEND_TLS_CERT_FILE
+      # and FRONTEND_TLS_KEY_FILE to empty in .env for plain HTTP.
+      TLS_CERT_FILE: ${FRONTEND_TLS_CERT_FILE-/certs/localhost.pem}
+      TLS_KEY_FILE: ${FRONTEND_TLS_KEY_FILE-/certs/localhost-key.pem}
+    ports:
+      - "${FRONTEND_PORT:-3000}:${FRONTEND_PORT:-3000}"
+    volumes:
+      - ../team-star-elephant-diagram-frontend/.certs:/certs:ro
+    depends_on:
+      - backend
 
 volumes:
   pgdata:
