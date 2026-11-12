@@ -18,3 +18,5 @@ source = "./modules/resource-group"
   location = var.resource_group_location 
   tags = local.common_tags
 }
+
+
