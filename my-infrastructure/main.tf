@@ -38,7 +38,4 @@ resource "azurerm_storage_container" "practice_container" {
   container_access_type = "private"
 }
 
-resource "terraform_data" "not_a_real_secret" {
-  input = var.not_a_real_secret
-}
 
