@@ -1,9 +1,3 @@
-resource "azurerm_resource_group" "main" {
-  name     = "${var.resource_group_name_prefix}-${local.environment}"
-  location = var.resource_group_location
-  tags     = local.common_tags
-}
-
 locals {
   environment = {
     default = "dev"
@@ -17,3 +11,12 @@ locals {
     managed_by  = "terraform"
   }
 }
+
+module "resource_group" {
+source = "./modules/resource-group"
+  name = var.resource_group_name_prefix
+  location = var.resource_group_location 
+  tags = local.common_tags
+}
+
+
