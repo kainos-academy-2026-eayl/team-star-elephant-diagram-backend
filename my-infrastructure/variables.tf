@@ -9,3 +9,15 @@ variable "resource_group_name_prefix" {
   default     = "rg-sed"
   description = "Prefix for the resource group name."
 }
+
+variable "storage_account_name_prefix" {
+  type        = string
+  default     = "sed"
+  description = "Prefix for the storage account name."
+}
+
+variable "storage_container_name" {
+  type        = string
+  default     = "sed-blob"
+  description = "Name of the storage container."
+}
