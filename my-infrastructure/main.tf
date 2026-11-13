@@ -13,10 +13,10 @@ locals {
 }
 
 module "resource_group" {
-source = "./modules/resource-group"
-  name = var.resource_group_name_prefix
-  location = var.resource_group_location 
-  tags = local.common_tags
+  source                  = "./modules/resource-group"
+  name                    = "${var.resource_group_name_prefix}-${local.environment}"
+  resource_group_location = var.resource_group_location
+  tags                    = local.common_tags
 }
 
 
