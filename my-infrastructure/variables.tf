@@ -21,3 +21,9 @@ variable "storage_container_name" {
   default     = "sed-blob"
   description = "Name of the storage container."
 }
+
+variable "not_a_real_secret" {
+  sensitive   = true
+  default   = "made_up_secret"
+  description = "Sensitivity level of the storage account."
+}

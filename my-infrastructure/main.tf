@@ -9,6 +9,7 @@ locals {
     environment = local.environment
     project     = "team-star-elephant"
     managed_by  = "terraform"
+    purpose     = "practice storage for team-star-elephant"
   }
 }
 resource "random_integer" "suffix" {
@@ -35,5 +36,9 @@ resource "azurerm_storage_container" "practice_container" {
   name                  = "${var.storage_container_name}${local.environment}${random_integer.suffix.result}"
   storage_account_id    = azurerm_storage_account.practice.id
   container_access_type = "private"
+}
+
+resource "terraform_data" "not_a_real_secret" {
+  input = var.not_a_real_secret
 }
 
