@@ -21,7 +21,7 @@ FROM build AS migrations
 
 USER node
 
-CMD ["npm", "run", "db:deploy"]
+CMD ["sh", "-c", "npm run db:deploy && npm run db:seed"]
 
 # Node dependencies (modules) stage
 FROM build AS production-dependencies
