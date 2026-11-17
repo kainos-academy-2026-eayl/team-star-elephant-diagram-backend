@@ -34,7 +34,6 @@ jobs:
           GIT_SHA: ${{ github.sha }}
         run: |
           docker build \
-            --build-context certificates="$HOME/certificates" \
             --target runtime \
             --tag "team-star-elephant-backend:${GIT_SHA}" \
             .
