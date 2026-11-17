@@ -59,7 +59,7 @@ services:
 
   backend:
     build: *backend-build
-    image: team-star-elephant-backend:${GIT_SHA:-local}
+    image: team-star-elephant-backend:${GIT_SHA}
     container_name: local-backend
     restart: unless-stopped
     environment:
