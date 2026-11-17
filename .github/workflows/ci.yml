@@ -23,9 +23,11 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
-      - name: Build
-        run: npm run build
       - name: Lint
         run: npm run lint
+      - name: Build
+        run: npm run build
       - name: Test
         run: npm test
+      - name: Container Build
+        run: docker compose up -d
