@@ -7,9 +7,18 @@ WORKDIR /app
 
 COPY package*.json ./
 COPY prisma ./prisma/
-COPY --from=certificates ["KAINOS-ZSCALER G2_2027.pem", "/usr/local/share/ca-certificates/company-ca.crt"]
-RUN update-ca-certificates
-ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/company-ca.crt
+# Install company CA certificate if provided as a secret. Optional.
+RUN --mount=type=secret,id=company_ca,required=false \
+  set -eu; \
+  if [ -f /run/secrets/company_ca ]; then \
+  openssl x509 -in /run/secrets/company_ca -noout; \
+  install -m 0644 \
+  /run/secrets/company_ca \
+  /usr/local/share/ca-certificates/company-ca.crt; \
+  fi; \
+  update-ca-certificates
+
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 RUN --mount=type=cache,target=/root/.npm npm ci
 
@@ -33,13 +42,23 @@ FROM node:22-bookworm-slim AS runtime
 
 WORKDIR /app
 
-COPY --from=certificates ["KAINOS-ZSCALER G2_2027.pem", "/usr/local/share/ca-certificates/company-ca.crt"]
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates openssl \
   && update-ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-ENV NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/company-ca.crt
+RUN --mount=type=secret,id=company_ca,required=false \
+  set -eu; \
+  if [ -f /run/secrets/company_ca ]; then \
+  openssl x509 -in /run/secrets/company_ca -noout; \
+  install -m 0644 \
+  /run/secrets/company_ca \
+  /usr/local/share/ca-certificates/company-ca.crt; \
+  fi; \
+  update-ca-certificates
+
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
 ENV NODE_ENV=development
 ENV PORT=3001
 

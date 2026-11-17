@@ -10,7 +10,23 @@ permissions:
 
 jobs:
   verify:
-    name: Build, lint and test
+    name: Lint and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+  build:
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,7 +41,13 @@ jobs:
         run: npm ci
       - name: Build
         run: npm run build
-      - name: Lint
-        run: npm run lint
       - name: Test
         run: npm test
+      - name: Container Build
+        env:
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          docker build \
+            --target runtime \
+            --tag "team-star-elephant-backend:${GIT_SHA}" \
+            .
