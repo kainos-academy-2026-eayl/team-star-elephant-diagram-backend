@@ -30,4 +30,6 @@ jobs:
       - name: Test
         run: npm test
       - name: Container Build
+        env:
+          GIT_SHA: ${{ github.sha }}
         run: docker compose up -d

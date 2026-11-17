@@ -50,6 +50,12 @@ The health check's `time` is the current UTC time in ISO 8601 format.
 
 ## Docker
 
+Docker Compose tags the backend image as `team-star-elephant-backend:${GIT_SHA:-local}`.
+CI supplies `GIT_SHA` from GitHub Actions' commit SHA; local builds default to
+`local`. To tag a local build with the current commit, run
+`GIT_SHA=$(git rev-parse HEAD) docker compose build backend`.
+This names the image locally; it does not push it to Docker Hub.
+
 From this backend directory, build the [Dockerfile](Dockerfile):
 
 ```sh
