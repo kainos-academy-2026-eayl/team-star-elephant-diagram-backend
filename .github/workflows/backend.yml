@@ -1,0 +1,56 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  push-image:
+    name: Push image to ACR
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.CLIENT_ID }}
+          tenant-id: ${{ secrets.TENANT_ID }}
+          subscription-id: ${{ secrets.SUBSCRIPTION_ID }}
+
+      - name: Build and push image
+        run: |
+          az acr login --name "$ACR_NAME"
+          IMAGE="$ACR_LOGIN_SERVER/backend:$GITHUB_SHA"
+          docker build --target runtime -t "$IMAGE" .
+          docker push "$IMAGE"
