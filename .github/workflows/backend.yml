@@ -38,6 +38,7 @@ jobs:
     env:
       ACR_NAME: ${{ vars.ACR_NAME }}
       ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+      TF_WORKSPACE: default
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +51,15 @@ jobs:
 
       - name: Build and push image
         run: |
+          case "$TF_WORKSPACE" in
+            default) ENVIRONMENT=dev ;;
+            test|prod) ENVIRONMENT="$TF_WORKSPACE" ;;
+            *)
+              echo "::error::Unsupported Terraform workspace: $TF_WORKSPACE"
+              exit 1
+              ;;
+          esac
           az acr login --name "$ACR_NAME"
-          IMAGE="$ACR_LOGIN_SERVER/backend:$GITHUB_SHA"
+          IMAGE="$ACR_LOGIN_SERVER/backend:$ENVIRONMENT-$GITHUB_SHA"
           docker build --target runtime -t "$IMAGE" .
           docker push "$IMAGE"
