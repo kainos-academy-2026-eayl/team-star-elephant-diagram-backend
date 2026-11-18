@@ -63,3 +63,25 @@ jobs:
           IMAGE="$ACR_LOGIN_SERVER/backend:$ENVIRONMENT-$GITHUB_SHA"
           docker build --target runtime -t "$IMAGE" .
           docker push "$IMAGE"
+
+  terraform-deploy:
+    name: Terraform Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+  
+      - name: Terraform Init
+        run: terraform init
+  
+      - name: Select Workspace
+        run: terraform workspace select default
+  
+      - name: Terraform Validate
+        run: terraform validate
+  
+      - name: Terraform Plan
+        run: terraform plan
+  
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
