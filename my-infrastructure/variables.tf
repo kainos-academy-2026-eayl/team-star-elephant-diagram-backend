@@ -22,3 +22,8 @@ variable "storage_container_name" {
   description = "Name of the storage container."
 }
 
+variable "container_registry_name_prefix" {
+  type        = string
+  default     = "sedcontainerregistry"
+  description = "Prefix for the container registry name."
+}

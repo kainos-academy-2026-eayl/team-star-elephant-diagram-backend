@@ -38,4 +38,10 @@ resource "azurerm_storage_container" "practice_container" {
   container_access_type = "private"
 }
 
-
+resource "azurerm_container_registry" "practice_acr" {
+  name                = "${var.container_registry_name_prefix}${local.environment}${random_integer.suffix.result}"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+  sku                 = "Basic"
+  admin_enabled       = false
+}
