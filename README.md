@@ -56,6 +56,16 @@ CI supplies `GIT_SHA` from GitHub Actions' commit SHA; local builds default to
 `GIT_SHA=$(git rev-parse HEAD) docker compose build backend`.
 This names the image locally; it does not push it to Docker Hub.
 
+The [backend GitHub Actions workflow](.github/workflows/backend.yml) publishes
+images to ACR on pushes to `main` as
+`<ACR_LOGIN_SERVER>/backend:<environment>-<full-commit-SHA>`.
+The publishing job explicitly selects `TF_WORKSPACE: default`, giving tags
+such as `dev-<full-commit-SHA>`. The tag mapping matches Terraform:
+`default` maps to `dev`, while `test` and `prod` keep their names.
+Unsupported workspace names fail the publishing step.
+This workspace selection is pipeline configuration, not automatic detection
+of a local Terraform workspace; it does not run Terraform or deploy the image.
+
 From this backend directory, build the [Dockerfile](Dockerfile):
 
 ```sh
