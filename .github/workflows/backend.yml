@@ -54,3 +54,16 @@ jobs:
           IMAGE="$ACR_LOGIN_SERVER/backend:$GITHUB_SHA"
           docker build --target runtime -t "$IMAGE" .
           docker push "$IMAGE"
+
+      - name: Deploy backend image
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
+        run: |
+          set -euo pipefail
+          : "${RESOURCE_GROUP:?Set AZURE_RESOURCE_GROUP}"
+          : "${APP_NAME:?Set CONTAINER_APP_NAME}"
+          az containerapp update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APP_NAME" \
+            --image "$ACR_LOGIN_SERVER/backend:$GITHUB_SHA"

@@ -27,3 +27,8 @@ variable "container_registry_name_prefix" {
   default     = "sedcontainerregistry"
   description = "Prefix for the container registry name."
 }
+
+variable "backend_image_tag" {
+  type        = string
+  description = "Existing image tag for initial deployment; CI manages later updates."
+}

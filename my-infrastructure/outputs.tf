@@ -25,3 +25,13 @@ output "container_registry_name" {
 output "container_registry_login_server" {
   value = azurerm_container_registry.practice_acr.login_server
 }
+
+output "key_vault_uri" {
+  description = "Vault endpoint for the backend."
+  value       = azurerm_key_vault.backend.vault_uri
+}
+
+output "backend_identity_client_id" {
+  description = "Client ID used to select the backend managed identity."
+  value       = azurerm_user_assigned_identity.backend.client_id
+}
