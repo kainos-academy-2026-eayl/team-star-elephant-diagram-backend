@@ -60,6 +60,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: build
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.SUBSCRIPTION_ID }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
