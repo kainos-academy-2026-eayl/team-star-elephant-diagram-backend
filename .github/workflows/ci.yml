@@ -29,6 +29,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: verify
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -51,3 +52,30 @@ jobs:
             --target runtime \
             --tag "team-star-elephant-backend:${GIT_SHA}" \
             .
+  plan:
+    defaults:
+      run:
+        working-directory: my-infrastructure
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: build
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.SUBSCRIPTION_ID }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: Terraform Init
+        run: terraform init -input=false
+      - name: Terraform Plan
+        run: terraform plan -input=false
