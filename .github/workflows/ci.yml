@@ -53,6 +53,9 @@ jobs:
             --tag "team-star-elephant-backend:${GIT_SHA}" \
             .
   plan:
+    defaults:
+      run:
+        working-directory: my-infrastructure
     name: Terraform Plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
