@@ -69,13 +69,22 @@ of a local Terraform workspace; it does not run Terraform or deploy the image.
 From this backend directory, build the [Dockerfile](Dockerfile):
 
 ```sh
-docker build --build-context certificates="$HOME/certificates" \
+docker build \
+  --secret id=company_ca,src="$HOME/certificates/KAINOS-ZSCALER G2_2027.pem" \
   -f Dockerfile -t elephant-backend .
 ```
 
-The certificate context must contain `KAINOS-ZSCALER G2_2027.pem`, the approved
-company CA certificate (no private key). It is trusted during the build and
-at runtime without copying it into the repository.
+On the company network, pass the approved company CA certificate (no private
+key) as the `company_ca` BuildKit secret. The Dockerfile installs it into the
+build and runtime trust stores without copying it into the repository.
+Compose passes this secret to both backend and migration builds from
+`~/certificates/KAINOS-ZSCALER G2_2027.pem`; set `CERTIFICATES_DIR` in `.env`
+if the directory differs. Rebuild with `docker compose up -d --build`.
+When first adding or replacing the certificate, run
+`docker compose build --no-cache backend migrate` before starting the stack:
+BuildKit secret changes do not invalidate cached certificate-install layers.
+The secret is optional in the Dockerfile, so GitHub-hosted Azure publishing
+can continue using `docker build` without a local certificate or this flag.
 
 The multi-stage build uses Node.js 22 on Debian Bookworm for both compilation
 and the slim runtime. Only compiled code, package metadata and production
@@ -108,7 +117,8 @@ The runtime excludes the Prisma CLI. Build the separate migration target and
 run it against the intended database before starting the application:
 
 ```sh
-docker build --build-context certificates="$HOME/certificates" \
+docker build \
+  --secret id=company_ca,src="$HOME/certificates/KAINOS-ZSCALER G2_2027.pem" \
   --target migrations -f Dockerfile -t elephant-backend-migrations .
 docker run --rm --env-file .env elephant-backend-migrations
 ```
@@ -439,6 +449,7 @@ Apply the additive `20261030110000_password_reset` migration with
 In the backend's untracked `.env`, set:
 
 ```ini
+NODE_ENV=development
 PASSWORD_RESET_DELIVERY=console
 FRONTEND_BASE_URL=https://localhost:3000
 ```

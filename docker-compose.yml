@@ -10,14 +10,14 @@
 # (db, backend, frontend), so DATABASE_URL and API_BASE_URL are built here and
 # any values for them in .env are ignored.
 #
-# The company CA certificate directory is passed to the backend build as the
-# "certificates" build context (default: ~/certificates). Override with
-# CERTIFICATES_DIR in .env.
+# The company CA certificate is passed to backend and migration builds as the
+# "company_ca" BuildKit secret. CERTIFICATES_DIR in .env overrides its directory
+# (default: ~/certificates).
 
 x-backend-build: &backend-build
   context: .
-  additional_contexts:
-    certificates: ${CERTIFICATES_DIR:-${HOME}/certificates}
+  secrets:
+    - company_ca
 
 x-database-url: &database-url
   DATABASE_URL: postgresql://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-dev}@db:5432/${POSTGRES_DB:-app_dev}
@@ -59,7 +59,7 @@ services:
 
   backend:
     build: *backend-build
-    image: team-star-elephant-backend:${GIT_SHA}
+    image: team-star-elephant-backend:${GIT_SHA:-local}
     container_name: local-backend
     restart: unless-stopped
     environment:
@@ -103,6 +103,10 @@ services:
       - ../team-star-elephant-diagram-frontend/.certs:/certs:ro
     depends_on:
       - backend
+
+secrets:
+  company_ca:
+    file: ${CERTIFICATES_DIR:-${HOME}/certificates}/KAINOS-ZSCALER G2_2027.pem
 
 volumes:
   pgdata:
