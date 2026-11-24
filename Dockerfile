@@ -59,7 +59,7 @@ RUN --mount=type=secret,id=company_ca,required=false \
 
 ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
-ENV NODE_ENV=development
+ENV NODE_ENV=production
 ENV PORT=3001
 
 COPY --from=build /app/package.json ./
