@@ -65,3 +65,10 @@ resource "azurerm_key_vault" "app" {
     bypass         = "None"
   }
 }
+
+resource "azurerm_user_assigned_identity" "app" {
+  name                = "id-sed-app-${local.environment}-${random_integer.suffix.result}"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+  tags                = local.common_tags
+}
