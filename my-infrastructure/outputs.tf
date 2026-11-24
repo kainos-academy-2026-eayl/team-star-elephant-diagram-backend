@@ -25,3 +25,15 @@ output "container_registry_name" {
 output "container_registry_login_server" {
   value = azurerm_container_registry.practice_acr.login_server
 }
+
+output "key_vault_name" {
+  value = azurerm_key_vault.app.name
+}
+
+output "key_vault_id" {
+  value = azurerm_key_vault.app.id
+}
+
+output "key_vault_uri" {
+  value = azurerm_key_vault.app.vault_uri
+}

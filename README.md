@@ -136,6 +136,68 @@ to a fresh database; the Docker image does not repair or bypass migrations.
 Check HTTP connectivity with `curl http://localhost:3001/health`. This endpoint
 does not check database connectivity.
 
+## Azure deployment: Stage 1 - Key Vault
+
+[Terraform](my-infrastructure/main.tf) creates an empty Standard Key Vault in
+the existing resource group. It uses the authenticated Azure tenant, Azure
+RBAC, and the existing environment and random suffix for naming.
+Public network access is disabled, the firewall denies access by default,
+and trusted-service bypass is disabled. Soft-deleted vaults and secrets are
+retained for seven days. Purge protection cannot be disabled once enabled
+and prevents early permanent deletion.
+
+From the backend repository, deploy using the existing remote state:
+
+```sh
+az login
+# Confirm this is the intended subscription before continuing.
+az account show --query '{name:name,id:id}' --output table
+export ARM_SUBSCRIPTION_ID="$(az account show --query id --output tsv)"
+cd my-infrastructure
+terraform init
+terraform workspace select default
+terraform fmt -check
+terraform validate
+terraform plan -out=key-vault.tfplan
+# Proceed only if the plan adds the vault without unexpected changes.
+terraform apply key-vault.tfplan
+terraform output key_vault_name
+rm key-vault.tfplan
+```
+
+Do not commit plan files or state files. The deployment account needs
+permission to create the vault and access the existing Terraform state.
+Alternatively, the existing backend GitHub Actions Terraform deployment job
+can create the vault after these changes are merged.
+
+This stage deliberately does not create secrets, secret data sources, app
+identities, or role assignments. Do not put cloud secret values into Terraform,
+GitHub Actions, committed files, or local deployment env files.
+
+Before adding secrets, provision a private endpoint, private DNS, and an
+administration path into its VNet, such as an approved VPN or an accessible
+VM. Opening Azure Portal from a computer without that network path does not
+bypass the vault firewall. Standard GitHub-hosted runners also lack that
+private network path by default; this stage's vault creation uses Azure's
+management API and does not require reading or writing secrets.
+
+Once private access works, an authorized administrator must grant your
+Azure user the **Key Vault Secrets Officer** role scoped to this vault.
+Creating the vault or having Contributor access does not automatically
+grant permission to write secrets. In Azure Portal, open the vault, select
+**Secrets > Generate/Import**, choose **Manual**, and add each secret.
+Backend secrets include `database-url`, `jwt-secret`,
+`admin-access-token-secret`, and `admin-refresh-token-secret`.
+Key Vault secret names use hyphens, not underscores; the later Container
+Apps stage will map them to the application's existing environment variable
+names. Use a database URL reachable from Azure, not a localhost URL.
+Add any other secrets required by the applications separately.
+Non-secret settings and feature flags remain ordinary Container Apps
+environment variables.
+
+Keep public access disabled if secret creation is blocked; complete the
+private access setup rather than opening the vault to all networks.
+
 ## Frontend integration
 
 FinanceManager is read-only and dashboard-only (`finance:view`). `GET /admin`

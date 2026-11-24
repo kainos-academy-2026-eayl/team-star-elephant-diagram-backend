@@ -45,3 +45,23 @@ resource "azurerm_container_registry" "practice_acr" {
   sku                 = "Basic"
   admin_enabled       = false
 }
+
+data "azurerm_client_config" "current" {}
+
+resource "azurerm_key_vault" "app" {
+  name                          = "kv-sed-${local.environment}-${random_integer.suffix.result}"
+  resource_group_name           = module.resource_group.name
+  location                      = module.resource_group.location
+  tenant_id                     = data.azurerm_client_config.current.tenant_id
+  sku_name                      = "standard"
+  rbac_authorization_enabled    = true
+  public_network_access_enabled = false
+  soft_delete_retention_days    = 7
+  purge_protection_enabled      = true
+  tags                          = local.common_tags
+
+  network_acls {
+    default_action = "Deny"
+    bypass         = "None"
+  }
+}
