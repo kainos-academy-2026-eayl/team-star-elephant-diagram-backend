@@ -449,6 +449,7 @@ Apply the additive `20261030110000_password_reset` migration with
 In the backend's untracked `.env`, set:
 
 ```ini
+NODE_ENV=development
 PASSWORD_RESET_DELIVERY=console
 FRONTEND_BASE_URL=https://localhost:3000
 ```
