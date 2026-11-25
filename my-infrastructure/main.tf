@@ -72,3 +72,13 @@ resource "azurerm_user_assigned_identity" "app" {
   location            = module.resource_group.location
   tags                = local.common_tags
 }
+
+resource "azurerm_container_app_environment" "app" {
+  name                = "cae-sed-${local.environment}-${random_integer.suffix.result}"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+
+  public_network_access = "Disabled"
+
+  tags = local.common_tags
+}
