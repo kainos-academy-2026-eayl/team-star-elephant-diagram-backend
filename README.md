@@ -198,6 +198,68 @@ environment variables.
 Keep public access disabled if secret creation is blocked; complete the
 private access setup rather than opening the vault to all networks.
 
+## Azure deployment: Stage 3a - Virtual network
+
+[Terraform](my-infrastructure/main.tf) adds a VNet named
+`vnet-sed-<environment>-<suffix>` in the existing resource group and location.
+It reuses the common tags and reserves the private address range
+`10.40.0.0/16` (`10.40.0.0` through `10.40.255.255`).
+Before connecting it to another network, check that their address ranges
+do not overlap.
+
+This step creates only the VNet. Subnets, logging, and the Container Apps
+environment will be added in later steps. Creating the VNet does not expose
+the applications to the internet or connect the private Key Vault.
+
+### 1. Validate
+
+From `my-infrastructure`, run:
+
+```sh
+terraform fmt -check
+terraform validate
+```
+
+### 2. Review and deploy through GitHub Actions
+
+Commit and push the change, then review the Terraform plan on your PR.
+If previous stages are already deployed, expect one new VNet with no
+replacements or deletions. Review any other changes separately before
+merging. The existing backend deployment workflow applies on `main`.
+
+### 3. Verify in Azure Portal
+
+Open **Virtual networks**, select `vnet-sed-dev-<suffix>`, and confirm
+that its address space is `10.40.0.0/16`.
+
+### Local deployment alternative
+
+For local deployment, after signing in and selecting the subscription as in
+Stage 1, run from `my-infrastructure`:
+
+```sh
+terraform init
+terraform workspace select default
+terraform fmt -check
+terraform validate
+terraform plan -out=vnet.tfplan
+# Review the plan before applying.
+terraform apply vnet.tfplan
+rm vnet.tfplan
+```
+
+### Next steps
+
+Add a dedicated subnet delegated to `Microsoft.App/environments`, then
+create the Container Apps environment using that subnet. VNet integration
+must be selected when creating the environment to avoid replacement later.
+Key Vault private endpoints need a separate subnet, private DNS, and an
+administration path into the network. Identity role assignments remain a
+separate access-control step.
+
+See [Container Apps networking](https://learn.microsoft.com/en-us/azure/container-apps/networking)
+for the distinction between environment networking and app ingress.
+
 ## Frontend integration
 
 FinanceManager is read-only and dashboard-only (`finance:view`). `GET /admin`

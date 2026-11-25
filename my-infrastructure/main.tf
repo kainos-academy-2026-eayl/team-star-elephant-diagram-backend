@@ -72,3 +72,11 @@ resource "azurerm_user_assigned_identity" "app" {
   location            = module.resource_group.location
   tags                = local.common_tags
 }
+
+resource "azurerm_virtual_network" "app" {
+  name                = "vnet-sed-${local.environment}-${random_integer.suffix.result}"
+  resource_group_name = module.resource_group.name
+  location            = module.resource_group.location
+  address_space       = ["10.40.0.0/16"]
+  tags                = local.common_tags
+}
