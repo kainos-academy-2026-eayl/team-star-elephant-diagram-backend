@@ -55,7 +55,7 @@ resource "azurerm_key_vault" "app" {
   tenant_id                     = data.azurerm_client_config.current.tenant_id
   sku_name                      = "standard"
   rbac_authorization_enabled    = true
-  public_network_access_enabled = false
+  public_network_access_enabled = true
   soft_delete_retention_days    = 7
   purge_protection_enabled      = true
   tags                          = local.common_tags
@@ -103,7 +103,18 @@ resource "azurerm_container_app" "backend" {
       image  = "${azurerm_container_registry.practice_acr.login_server}/backend:dev-7811266185188c8dc4a20e8667d1f61a911b1884"
       cpu    = 0.25
       memory = "0.5Gi"
+
+      env {
+        name  = "JWT_SECRET"
+        secret_name = "jwt-secret"
+      }
     }
+  }
+
+  secret {
+    name  = "jwt-secret"
+    key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/jwt-secret"
+    identity = azurerm_user_assigned_identity.app.id
   }
 }
 
@@ -130,6 +141,18 @@ resource "azurerm_container_app" "frontend" {
       image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:982467c8854d028c95760de1a09d64be19e97ca5"
       cpu    = 0.25
       memory = "0.5Gi"
+
+
+      env {
+        name  = "JWT_SECRET"
+        secret_name = "jwt-secret"
+      }
     }
+  }
+   
+  secret {
+    name  = "jwt-secret"
+    key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/jwt-secret"
+    identity = azurerm_user_assigned_identity.app.id
   }
 }
