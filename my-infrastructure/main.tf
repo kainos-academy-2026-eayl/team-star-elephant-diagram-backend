@@ -105,16 +105,49 @@ resource "azurerm_container_app" "backend" {
       memory = "0.5Gi"
 
       env {
-        name  = "JWT_SECRET"
+        name        = "JWT_SECRET"
         secret_name = "jwt-secret"
+      }
+
+      env {
+        name        = "ADMIN_ACCESS_TOKEN_SECRET"
+        secret_name = "admin-access-token-secret"
+      }
+
+      env {
+        name        = "ADMIN_REFRESH_TOKEN_SECRET"
+        secret_name = "admin-refresh-token-secret"
+      }
+
+      env {
+        name        = "DATABASE_URL"
+        secret_name = "database-url"
       }
     }
   }
 
   secret {
-    name  = "jwt-secret"
+    name                = "jwt-secret"
     key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/jwt-secret"
-    identity = azurerm_user_assigned_identity.app.id
+    identity            = azurerm_user_assigned_identity.app.id
+  }
+
+  secret {
+    name                = "admin-access-token-secret"
+    key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/admin-access-token-secret"
+    identity            = azurerm_user_assigned_identity.app.id
+  }
+
+  secret {
+    name                = "admin-refresh-token-secret"
+    key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/admin-refresh-token-secret"
+    identity            = azurerm_user_assigned_identity.app.id
+  }
+
+  secret {
+    name                = "database-url"
+    key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/database-url"
+    identity            = azurerm_user_assigned_identity.app.id
   }
 }
 
@@ -141,18 +174,6 @@ resource "azurerm_container_app" "frontend" {
       image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:982467c8854d028c95760de1a09d64be19e97ca5"
       cpu    = 0.25
       memory = "0.5Gi"
-
-
-      env {
-        name  = "JWT_SECRET"
-        secret_name = "jwt-secret"
-      }
     }
-  }
-   
-  secret {
-    name  = "jwt-secret"
-    key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/jwt-secret"
-    identity = azurerm_user_assigned_identity.app.id
   }
 }
