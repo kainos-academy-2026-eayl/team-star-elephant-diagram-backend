@@ -61,3 +61,19 @@ output "container_app_environment_name" {
 output "container_app_environment_id" {
   value = azurerm_container_app_environment.app.id
 }
+
+output "backend_container_app_name" {
+  value = azurerm_container_app.backend.name
+}
+
+output "backend_container_app_id" {
+  value = azurerm_container_app.backend.id
+}
+
+output "frontend_container_app_name" {
+  value = azurerm_container_app.frontend.name
+}
+
+output "frontend_container_app_id" {
+  value = azurerm_container_app.frontend.id
+}
