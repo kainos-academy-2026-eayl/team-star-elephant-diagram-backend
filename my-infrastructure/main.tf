@@ -76,10 +76,11 @@ resource "azurerm_user_assigned_identity" "app" {
 }
 
 resource "azurerm_container_app_environment" "app" {
-  name                = "cae-sed-${local.environment}-${random_integer.suffix.result}"
-  location            = module.resource_group.location
-  resource_group_name = module.resource_group.name
-  tags                = local.common_tags
+  name                  = "cae-sed-${local.environment}-${random_integer.suffix.result}"
+  location              = module.resource_group.location
+  resource_group_name   = module.resource_group.name
+  public_network_access = "Enabled"
+  tags                  = local.common_tags
 }
 
 resource "azurerm_container_app" "backend" {
