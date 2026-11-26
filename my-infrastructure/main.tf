@@ -11,6 +11,7 @@ locals {
     managed_by  = "terraform"
     purpose     = "practice storage for team-star-elephant"
   }
+  frontend_app_name = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
 }
 resource "random_integer" "suffix" {
   min = 1000
@@ -97,6 +98,18 @@ resource "azurerm_container_app" "backend" {
     identity = azurerm_user_assigned_identity.app.id
   }
 
+  ingress {
+    external_enabled           = false
+    target_port                = 3001
+    transport                  = "http"
+    allow_insecure_connections = false
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
   template {
     container {
       name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
@@ -104,6 +117,10 @@ resource "azurerm_container_app" "backend" {
       cpu    = 0.25
       memory = "0.5Gi"
 
+      env {
+        name  = "FRONTEND_BASE_URL"
+        value = "https://${local.frontend_app_name}.${azurerm_container_app_environment.app.default_domain}"
+      }
       env {
         name        = "JWT_SECRET"
         secret_name = "jwt-secret"
@@ -168,6 +185,18 @@ resource "azurerm_container_app" "frontend" {
     identity = azurerm_user_assigned_identity.app.id
   }
 
+  ingress {
+    external_enabled           = true
+    target_port                = 3000
+    transport                  = "http"
+    allow_insecure_connections = false
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
   template {
     container {
       name   = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
@@ -175,5 +204,10 @@ resource "azurerm_container_app" "frontend" {
       cpu    = 0.25
       memory = "0.5Gi"
     }
+    env {
+      name        = "API_BASE_URL"
+      value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
+    }
+
   }
 }
