@@ -11,6 +11,7 @@ locals {
     managed_by  = "terraform"
     purpose     = "practice storage for team-star-elephant"
   }
+  backend_app_name  = "sed-backend-${local.environment}-${random_integer.suffix.result}"
   frontend_app_name = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
 }
 resource "random_integer" "suffix" {
@@ -82,7 +83,7 @@ resource "azurerm_container_app_environment" "app" {
 }
 
 resource "azurerm_container_app" "backend" {
-  name                         = "sed-backend-${local.environment}-${random_integer.suffix.result}"
+  name                         = local.backend_app_name
   container_app_environment_id = azurerm_container_app_environment.app.id
   resource_group_name          = module.resource_group.name
   revision_mode                = "Single"
@@ -205,8 +206,8 @@ resource "azurerm_container_app" "frontend" {
       memory = "0.5Gi"
 
       env {
-        name        = "API_BASE_URL"
-        value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
+        name  = "API_BASE_URL"
+        value = "https://${local.backend_app_name}.internal.${azurerm_container_app_environment.app.default_domain}"
       }
     }
   }
