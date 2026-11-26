@@ -113,6 +113,10 @@ resource "azurerm_container_app" "backend" {
   }
 
   template {
+
+    min_replicas = 1
+    max_replicas = 1
+
     container {
       name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
       image  = "${azurerm_container_registry.practice_acr.login_server}/backend:dev-7811266185188c8dc4a20e8667d1f61a911b1884"
@@ -143,6 +147,28 @@ resource "azurerm_container_app" "backend" {
         secret_name = "database-url"
       }
     }
+
+    container {
+      name   = "postgres"
+      image  = "${azurerm_container_registry.practice_acr.login_server}/postgres:17-alpine"
+      cpu    = 0.25
+      memory = "0.5Gi"
+
+      env {
+        name  = "POSTGRES_USER"
+        value = "dev"
+      }
+
+      env {
+        name  = "POSTGRES_DB"
+        value = "app_dev"
+      }
+
+      env {
+        name        = "POSTGRES_PASSWORD"
+        secret_name = "postgres-password"
+      }
+    }
   }
 
   secret {
@@ -166,6 +192,12 @@ resource "azurerm_container_app" "backend" {
   secret {
     name                = "database-url"
     key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/database-url"
+    identity            = azurerm_user_assigned_identity.app.id
+  }
+
+  secret {
+    name                = "postgres-password"
+    key_vault_secret_id = "${azurerm_key_vault.app.vault_uri}secrets/postgres-password"
     identity            = azurerm_user_assigned_identity.app.id
   }
 }

@@ -63,6 +63,15 @@ jobs:
           IMAGE="$ACR_LOGIN_SERVER/backend:$ENVIRONMENT-$GITHUB_SHA"
           docker build --target runtime -t "$IMAGE" .
           docker push "$IMAGE"
+      
+      - name: Ensure postgres image exists in ACR
+        run: |
+          if ! az acr manifest show-metadata --registry "$ACR_NAME" --name "postgres:17-alpine" >/dev/null 2>&1; then
+            az acr import \
+              --name "$ACR_NAME" \
+              --source docker.io/library/postgres:17-alpine \
+              --image postgres:17-alpine
+          fi
 
   terraform-deploy:
     defaults:
