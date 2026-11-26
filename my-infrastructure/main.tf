@@ -11,6 +11,8 @@ locals {
     managed_by  = "terraform"
     purpose     = "practice storage for team-star-elephant"
   }
+  backend_app_name  = "sed-backend-${local.environment}-${random_integer.suffix.result}"
+  frontend_app_name = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
 }
 resource "random_integer" "suffix" {
   min = 1000
@@ -81,7 +83,7 @@ resource "azurerm_container_app_environment" "app" {
 }
 
 resource "azurerm_container_app" "backend" {
-  name                         = "sed-backend-${local.environment}-${random_integer.suffix.result}"
+  name                         = local.backend_app_name
   container_app_environment_id = azurerm_container_app_environment.app.id
   resource_group_name          = module.resource_group.name
   revision_mode                = "Single"
@@ -97,6 +99,18 @@ resource "azurerm_container_app" "backend" {
     identity = azurerm_user_assigned_identity.app.id
   }
 
+  ingress {
+    external_enabled           = false
+    target_port                = 3001
+    transport                  = "http"
+    allow_insecure_connections = false
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
   template {
     container {
       name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
@@ -104,6 +118,10 @@ resource "azurerm_container_app" "backend" {
       cpu    = 0.25
       memory = "0.5Gi"
 
+      env {
+        name  = "FRONTEND_BASE_URL"
+        value = "https://${local.frontend_app_name}.${azurerm_container_app_environment.app.default_domain}"
+      }
       env {
         name        = "JWT_SECRET"
         secret_name = "jwt-secret"
@@ -168,12 +186,29 @@ resource "azurerm_container_app" "frontend" {
     identity = azurerm_user_assigned_identity.app.id
   }
 
+  ingress {
+    external_enabled           = true
+    target_port                = 3000
+    transport                  = "http"
+    allow_insecure_connections = false
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
   template {
     container {
       name   = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
       image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:982467c8854d028c95760de1a09d64be19e97ca5"
       cpu    = 0.25
       memory = "0.5Gi"
+
+      env {
+        name  = "API_BASE_URL"
+        value = "https://${local.backend_app_name}.internal.${azurerm_container_app_environment.app.default_domain}"
+      }
     }
   }
 }
