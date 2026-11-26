@@ -203,11 +203,11 @@ resource "azurerm_container_app" "frontend" {
       image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:982467c8854d028c95760de1a09d64be19e97ca5"
       cpu    = 0.25
       memory = "0.5Gi"
-    }
-    env {
-      name        = "API_BASE_URL"
-      value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
-    }
 
+      env {
+        name        = "API_BASE_URL"
+        value       = "https://${azurerm_container_app.backend.ingress[0].fqdn}"
+      }
+    }
   }
 }
