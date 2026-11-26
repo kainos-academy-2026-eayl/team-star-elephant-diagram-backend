@@ -64,10 +64,12 @@ ENV PORT=3001
 
 COPY --from=build /app/package.json ./
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/prisma ./prisma
+COPY --from=build --chmod=755 /app/scripts/entrypoint.sh ./scripts/entrypoint.sh
 COPY --from=production-dependencies /app/node_modules ./node_modules
 
 USER node
 
 EXPOSE 3001
 
-CMD ["node", "dist/index.js"]
+CMD ["./scripts/entrypoint.sh"]
