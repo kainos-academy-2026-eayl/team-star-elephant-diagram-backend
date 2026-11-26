@@ -97,16 +97,6 @@ resource "azurerm_container_app" "backend" {
     identity = azurerm_user_assigned_identity.app.id
   }
 
-  ingress {
-    external_enabled = false
-    target_port      = 3001
-
-    traffic_weight {
-      latest_revision = true
-      percentage      = 100
-    }
-  }
-
   template {
     container {
       name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
