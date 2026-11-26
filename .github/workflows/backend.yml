@@ -66,11 +66,10 @@ jobs:
       
       - name: Ensure postgres image exists in ACR
         run: |
-          if ! az acr manifest show-metadata --registry "$ACR_NAME" --name "postgres:17-alpine" >/dev/null 2>&1; then
-            az acr import \
-              --name "$ACR_NAME" \
-              --source public.ecr.aws/docker/library/postgres:17-alpine \
-              --image postgres:17-alpine
+          if ! docker manifest inspect "$ACR_LOGIN_SERVER/postgres:17-alpine" >/dev/null 2>&1; then
+            docker pull --platform linux/amd64 postgres:17-alpine
+            docker tag postgres:17-alpine "$ACR_LOGIN_SERVER/postgres:17-alpine"
+            docker push "$ACR_LOGIN_SERVER/postgres:17-alpine"
           fi
 
   terraform-deploy:
