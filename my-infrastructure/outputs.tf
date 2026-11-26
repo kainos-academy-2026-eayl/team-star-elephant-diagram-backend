@@ -53,3 +53,27 @@ output "app_identity_client_id" {
 output "app_identity_principal_id" {
   value = azurerm_user_assigned_identity.app.principal_id
 }
+
+output "container_app_environment_name" {
+  value = azurerm_container_app_environment.app.name
+}
+
+output "container_app_environment_id" {
+  value = azurerm_container_app_environment.app.id
+}
+
+output "backend_container_app_name" {
+  value = azurerm_container_app.backend.name
+}
+
+output "backend_container_app_id" {
+  value = azurerm_container_app.backend.id
+}
+
+output "frontend_container_app_name" {
+  value = azurerm_container_app.frontend.name
+}
+
+output "frontend_container_app_id" {
+  value = azurerm_container_app.frontend.id
+}

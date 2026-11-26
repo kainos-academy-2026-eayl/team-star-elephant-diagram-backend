@@ -72,3 +72,64 @@ resource "azurerm_user_assigned_identity" "app" {
   location            = module.resource_group.location
   tags                = local.common_tags
 }
+
+resource "azurerm_container_app_environment" "app" {
+  name                = "cae-sed-${local.environment}-${random_integer.suffix.result}"
+  location            = module.resource_group.location
+  resource_group_name = module.resource_group.name
+  tags                = local.common_tags
+}
+
+resource "azurerm_container_app" "backend" {
+  name                         = "sed-backend-${local.environment}-${random_integer.suffix.result}"
+  container_app_environment_id = azurerm_container_app_environment.app.id
+  resource_group_name          = module.resource_group.name
+  revision_mode                = "Single"
+  tags                         = local.common_tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.practice_acr.login_server
+    identity = azurerm_user_assigned_identity.app.id
+  }
+
+  template {
+    container {
+      name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
+      image  = "${azurerm_container_registry.practice_acr.login_server}/backend:dev-7811266185188c8dc4a20e8667d1f61a911b1884"
+      cpu    = 0.25
+      memory = "0.5Gi"
+    }
+  }
+}
+
+resource "azurerm_container_app" "frontend" {
+  name                         = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
+  container_app_environment_id = azurerm_container_app_environment.app.id
+  resource_group_name          = module.resource_group.name
+  revision_mode                = "Single"
+  tags                         = local.common_tags
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.app.id]
+  }
+
+  registry {
+    server   = azurerm_container_registry.practice_acr.login_server
+    identity = azurerm_user_assigned_identity.app.id
+  }
+
+  template {
+    container {
+      name   = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
+      image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:982467c8854d028c95760de1a09d64be19e97ca5"
+      cpu    = 0.25
+      memory = "0.5Gi"
+    }
+  }
+}
