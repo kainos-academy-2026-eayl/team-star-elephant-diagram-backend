@@ -61,8 +61,8 @@ resource "azurerm_key_vault" "app" {
   tags                          = local.common_tags
 
   network_acls {
-    default_action = "Deny"
-    bypass         = "None"
+    default_action = "allow"
+    bypass         = "AzureServices"
   }
 }
 
