@@ -119,7 +119,7 @@ resource "azurerm_container_app" "backend" {
 
     container {
       name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
-      image  = "${azurerm_container_registry.practice_acr.login_server}/backend:dev-7811266185188c8dc4a20e8667d1f61a911b1884"
+      image  = "${azurerm_container_registry.practice_acr.login_server}/backend:dev-8e012715f27843c179d6dc0d479702ea22842ebc"
       cpu    = 0.25
       memory = "0.5Gi"
 
