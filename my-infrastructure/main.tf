@@ -1,9 +1,5 @@
 locals {
-  environment = {
-    default = "dev"
-    test    = "test"
-    prod    = "prod"
-  }[terraform.workspace]
+  environment = var.environment
 
   common_tags = {
     environment = local.environment
@@ -114,8 +110,8 @@ resource "azurerm_container_app" "backend" {
 
   template {
 
-    min_replicas = 1
-    max_replicas = 1
+    min_replicas = var.backend_min_replicas
+    max_replicas = var.backend_max_replicas
 
     container {
       name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
@@ -146,6 +142,14 @@ resource "azurerm_container_app" "backend" {
         name        = "DATABASE_URL"
         secret_name = "database-url"
       }
+
+      dynamic "env" {
+        for_each = var.backend_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
     }
 
     container {
@@ -156,12 +160,12 @@ resource "azurerm_container_app" "backend" {
 
       env {
         name  = "POSTGRES_USER"
-        value = "dev"
+        value = local.environment
       }
 
       env {
         name  = "POSTGRES_DB"
-        value = "app_dev"
+        value = "app_${local.environment}"
       }
 
       env {
@@ -232,6 +236,9 @@ resource "azurerm_container_app" "frontend" {
   }
 
   template {
+    min_replicas = var.frontend_min_replicas
+    max_replicas = var.frontend_max_replicas
+
     container {
       name   = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
       image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:${var.frontend_image_tag}"
@@ -241,6 +248,14 @@ resource "azurerm_container_app" "frontend" {
       env {
         name  = "API_BASE_URL"
         value = "https://${local.backend_app_name}.internal.${azurerm_container_app_environment.app.default_domain}"
+      }
+
+      dynamic "env" {
+        for_each = var.frontend_env
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
     }
   }
