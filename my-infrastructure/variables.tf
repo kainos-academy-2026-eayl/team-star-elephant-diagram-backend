@@ -27,3 +27,23 @@ variable "container_registry_name_prefix" {
   default     = "sedcontainerregistry"
   description = "Prefix for the container registry name."
 }
+
+variable "backend_image_tag" {
+  type        = string
+  description = "Existing ACR backend image tag to deploy."
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.backend_image_tag))
+    error_message = "backend_image_tag must be a valid, non-empty container image tag."
+  }
+}
+
+variable "frontend_image_tag" {
+  type        = string
+  description = "Existing ACR frontend image tag to deploy."
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.frontend_image_tag))
+    error_message = "frontend_image_tag must be a valid, non-empty container image tag."
+  }
+}

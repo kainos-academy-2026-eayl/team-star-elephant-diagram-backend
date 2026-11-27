@@ -119,7 +119,7 @@ resource "azurerm_container_app" "backend" {
 
     container {
       name   = "sed-backend-${local.environment}-${random_integer.suffix.result}"
-      image  = "${azurerm_container_registry.practice_acr.login_server}/backend:dev-8e012715f27843c179d6dc0d479702ea22842ebc"
+      image  = "${azurerm_container_registry.practice_acr.login_server}/backend:${var.backend_image_tag}"
       cpu    = 0.25
       memory = "0.5Gi"
 
@@ -234,7 +234,7 @@ resource "azurerm_container_app" "frontend" {
   template {
     container {
       name   = "sed-frontend-${local.environment}-${random_integer.suffix.result}"
-      image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:982467c8854d028c95760de1a09d64be19e97ca5"
+      image  = "${azurerm_container_registry.practice_acr.login_server}/frontend:${var.frontend_image_tag}"
       cpu    = 0.25
       memory = "0.5Gi"
 

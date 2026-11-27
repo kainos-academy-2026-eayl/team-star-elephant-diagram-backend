@@ -64,7 +64,20 @@ such as `dev-<full-commit-SHA>`. The tag mapping matches Terraform:
 `default` maps to `dev`, while `test` and `prod` keep their names.
 Unsupported workspace names fail the publishing step.
 This workspace selection is pipeline configuration, not automatic detection
-of a local Terraform workspace; it does not run Terraform or deploy the image.
+of a local Terraform workspace.
+
+The backend repository's GitHub Actions variables `BACKEND_IMAGE_TAG` and
+`FRONTEND_IMAGE_TAG` select the existing ACR image tags used by Terraform plan
+and deployment. Set them to the tags only, not full image URLs. Builds publish
+commit-tagged images but do not update these variables: select new tags manually
+after the corresponding images have been pushed. The next backend deployment
+applies both selected tags, even if only one image was built by that workflow.
+Changing a variable alone does not run a deployment. Changing the backend image
+can replace its replica and erase the PostgreSQL sidecar's ephemeral data.
+
+For local Terraform commands, provide the same values through
+`TF_VAR_backend_image_tag` and `TF_VAR_frontend_image_tag` (or Terraform's
+other variable input mechanisms). Both values are required.
 
 The Terraform deployment job uses the `terraform-default` concurrency group
 to prevent overlapping dev deployments within this repository. An active
