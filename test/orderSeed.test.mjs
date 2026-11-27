@@ -108,6 +108,7 @@ test('order seed resolves database IDs and computes exact totals for nested orde
         assert.deepEqual(order.orderItems.create, fixture.items.map((item) => ({
             productId: db.productRows.find((product) => product.name === item.productName).productId,
             quantity: item.quantity,
+            unitPrice: db.productRows.find((product) => product.name === item.productName).price,
         })));
     }
 });
@@ -116,9 +117,16 @@ test('rerunning the order seed does not duplicate samples or reset edited status
     const db = database();
     await seedOrders(db.prisma);
     db.saved[0].orderStatus = 'SHIPPED';
-    const before = structuredClone(db.saved.map(({ cost, ...order }) => ({ ...order, cost: cost.toString() })));
+    const snapshot = () => db.saved.map(({ cost, orderItems, ...order }) => ({
+        ...order,
+        cost: cost.toString(),
+        orderItems: {
+            create: orderItems.create.map(({ unitPrice, ...item }) => ({ ...item, unitPrice: unitPrice.toString() })),
+        },
+    }));
+    const before = structuredClone(snapshot());
     assert.equal(await seedOrders(db.prisma), 0);
-    assert.deepEqual(db.saved.map(({ cost, ...order }) => ({ ...order, cost: cost.toString() })), before);
+    assert.deepEqual(snapshot(), before);
 });
 
 test('a missing customer aborts the transaction instead of leaving partial orders', async () => {
