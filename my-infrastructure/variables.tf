@@ -50,11 +50,11 @@ variable "frontend_image_tag" {
 
 variable "environment" {
   type        = string
-  description = "Environment to deploy (dev, test or prod)."
+  description = "Environment to deploy (dev or prod)."
 
   validation {
-    condition     = contains(["dev", "test", "prod"], var.environment)
-    error_message = "environment must be dev, test or prod."
+    condition     = contains(["dev", "prod"], var.environment)
+    error_message = "environment must be dev or prod."
   }
 }
 
