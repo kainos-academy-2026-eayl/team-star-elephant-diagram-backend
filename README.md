@@ -66,6 +66,14 @@ Unsupported workspace names fail the publishing step.
 This workspace selection is pipeline configuration, not automatic detection
 of a local Terraform workspace; it does not run Terraform or deploy the image.
 
+The Terraform deployment job uses the `terraform-default` concurrency group
+to prevent overlapping dev deployments within this repository. An active
+deployment is not cancelled when another run arrives. GitHub Actions keeps
+at most one pending job in the group; newer pending jobs replace older ones,
+so this is not a FIFO deployment queue. Azure remote state locking remains
+enabled to protect against Terraform runs outside this workflow.
+This does not add test or production deployments.
+
 From this backend directory, build the [Dockerfile](Dockerfile):
 
 ```sh

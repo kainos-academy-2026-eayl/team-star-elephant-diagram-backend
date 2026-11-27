@@ -73,6 +73,9 @@ jobs:
           fi
 
   terraform-deploy:
+    concurrency:
+      group: terraform-default
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: my-infrastructure
