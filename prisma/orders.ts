@@ -100,7 +100,11 @@ export async function seedOrders(prisma: PrismaClient): Promise<number> {
                     modifiedAt: order.modifiedAt,
                     cost,
                     orderItems: {
-                        create: items.map(({ product, quantity }) => ({ productId: product.productId, quantity })),
+                        create: items.map(({ product, quantity }) => ({
+                            productId: product.productId,
+                            quantity,
+                            unitPrice: product.price,
+                        })),
                     },
                 },
             });
