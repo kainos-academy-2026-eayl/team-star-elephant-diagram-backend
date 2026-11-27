@@ -38,7 +38,7 @@ jobs:
     env:
       ACR_NAME: ${{ vars.ACR_NAME }}
       ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
-      TF_WORKSPACE: default
+      ENVIRONMENT: dev
     steps:
       - uses: actions/checkout@v4
 
@@ -51,14 +51,6 @@ jobs:
 
       - name: Build and push image
         run: |
-          case "$TF_WORKSPACE" in
-            default) ENVIRONMENT=dev ;;
-            test|prod) ENVIRONMENT="$TF_WORKSPACE" ;;
-            *)
-              echo "::error::Unsupported Terraform workspace: $TF_WORKSPACE"
-              exit 1
-              ;;
-          esac
           az acr login --name "$ACR_NAME"
           IMAGE="$ACR_LOGIN_SERVER/backend:$ENVIRONMENT-$GITHUB_SHA"
           docker build --target runtime -t "$IMAGE" .
@@ -74,7 +66,7 @@ jobs:
 
   terraform-deploy:
     concurrency:
-      group: terraform-default
+      group: terraform-dev
       cancel-in-progress: false
     defaults:
       run:
@@ -83,6 +75,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      ENVIRONMENT: dev
       ARM_USE_OIDC: "true"
       ARM_CLIENT_ID: ${{ secrets.CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.TENANT_ID }}
@@ -104,18 +97,36 @@ jobs:
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
   
       - name: Terraform Init
-        run: terraform init
-  
-      - name: Select Workspace
-        run: terraform workspace select default
+        run: terraform init -input=false -backend-config="key=backend-${ENVIRONMENT}.tfstate"
   
       - name: Terraform Validate
         run: terraform validate
   
       - name: Terraform Plan
-        run: terraform plan
+        run: |
+          echo "Planning $ENVIRONMENT against backend-${ENVIRONMENT}.tfstate"
+          terraform plan -input=false -no-color -var-file="${ENVIRONMENT}.tfvars" -out=tfplan
+
+      - name: Publish plan to job summary
+        run: |
+          terraform show -no-color tfplan > plan.txt
+          {
+            echo "### Terraform plan being applied: \`$ENVIRONMENT\` (\`backend-${ENVIRONMENT}.tfstate\`)"
+            echo
+            echo "**$(grep -E '^(Plan:|No changes)' plan.txt || echo 'See full plan below.')**"
+            echo
+            echo "<details><summary>Show plan</summary>"
+            echo
+            echo '```'
+            head -c 60000 plan.txt
+            echo
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
   
       - name: Terraform Apply
-        run: terraform apply -auto-approve
+        run: terraform apply -input=false tfplan

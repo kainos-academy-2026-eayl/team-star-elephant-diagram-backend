@@ -3,7 +3,6 @@ terraform {
     resource_group_name  = "rg-sed-tfstate"
     storage_account_name = "sedtfstate4644"
     container_name       = "tfstate"
-    key                  = "backend-dev.tfstate"
     use_azuread_auth     = true
   }
 

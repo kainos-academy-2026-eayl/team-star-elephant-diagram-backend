@@ -54,7 +54,7 @@ jobs:
             .
   plan:
     concurrency:
-      group: terraform-default
+      group: terraform-dev
       cancel-in-progress: false
     defaults:
       run:
@@ -66,7 +66,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      pull-requests: write
     env:
+      ENVIRONMENT: dev
       ARM_USE_OIDC: "true"
       ARM_CLIENT_ID: ${{ secrets.CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.TENANT_ID }}
@@ -87,6 +89,33 @@ jobs:
         with:
           terraform_wrapper: false
       - name: Terraform Init
-        run: terraform init -input=false
+        run: terraform init -input=false -backend-config="key=backend-${ENVIRONMENT}.tfstate"
       - name: Terraform Plan
-        run: terraform plan -input=false
+        run: |
+          echo "Planning $ENVIRONMENT against backend-${ENVIRONMENT}.tfstate"
+          terraform plan -input=false -no-color -var-file="${ENVIRONMENT}.tfvars" -out=tfplan
+      - name: Render plan
+        run: |
+          terraform show -no-color tfplan > plan.txt
+          {
+            echo "### Terraform plan: \`$ENVIRONMENT\` (\`backend-${ENVIRONMENT}.tfstate\`)"
+            echo
+            echo "**$(grep -E '^(Plan:|No changes)' plan.txt || echo 'See full plan below.')**"
+            echo
+            echo "<details><summary>Show plan</summary>"
+            echo
+            echo '```'
+            head -c 60000 plan.txt
+            echo
+            echo '```'
+            echo "</details>"
+            echo
+            echo "_Commit ${GITHUB_SHA::7}, run [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})_"
+          } > plan.md
+          cat plan.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --body-file plan.md --edit-last --create-if-none
