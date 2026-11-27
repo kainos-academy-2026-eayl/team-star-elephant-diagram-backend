@@ -61,6 +61,11 @@ variable "environment" {
 variable "backend_min_replicas" {
   type    = number
   default = 1
+  nullable = false
+   validation {
+     condition     = var.backend_min_replicas == 1
+     error_message = "Backend runs an ephemeral PostgreSQL sidecar; backend_min_replicas must be 1 to prevent data loss on scale-to-zero."
+  }
 }
 
 variable "backend_max_replicas" {
